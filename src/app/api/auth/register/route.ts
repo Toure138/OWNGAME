@@ -24,8 +24,11 @@ const schema = z.object({
 
 // POST /api/auth/register
 export const POST = guarded(async (req: NextRequest) => {
-  // 5 créations de compte par IP et par heure.
-  rateLimit(`register:${clientIp(req)}`, 5, 60 * 60_000)
+  // Créations de compte par heure et par IP. Le plafond reste haut à dessein :
+  // un groupe qui s'inscrit ensemble depuis une même connexion (classe,
+  // entreprise, partage de connexion mobile) partage une seule adresse
+  // publique, et une limite serrée en bloquerait la majorité.
+  rateLimit(`register:${clientIp(req)}`, 30, 60 * 60_000)
 
   const body = await parseBody(req, schema)
 

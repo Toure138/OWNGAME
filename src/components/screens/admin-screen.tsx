@@ -390,13 +390,10 @@ function UsersTab({ headers, currentUserId }: { headers: Headers; currentUserId:
     [headers]
   )
 
+  // Recherche différée : évite une requête par frappe clavier. Cet effet
+  // couvre aussi le chargement initial, `search` valant alors la chaîne vide.
   useEffect(() => {
-    void load()
-  }, [load])
-
-  // Recherche différée : évite une requête par frappe clavier.
-  useEffect(() => {
-    const id = setTimeout(() => void load(search), 350)
+    const id = setTimeout(() => void load(search), search ? 350 : 0)
     return () => clearTimeout(id)
   }, [search, load])
 

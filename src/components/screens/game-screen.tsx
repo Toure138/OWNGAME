@@ -154,14 +154,16 @@ export function GameScreen() {
   useEffect(() => {
     const offs = [
       eventBus.on('game:started', data => {
-        const payload = data as { game: Game; youAre: 'A' | 'B' }
+        // `chat` n'est présent qu'à la reprise d'une partie après un
+        // rechargement de page ; il vaut le tableau vide au démarrage.
+        const payload = data as { game: Game; youAre: 'A' | 'B'; chat?: ChatMsg[] }
         setGame(payload.game)
         setYouAre(payload.youAre)
         setSummary(null)
         setQuestion(null)
         setResult(null)
         setChosen(null)
-        setChat([])
+        setChat(payload.chat ?? [])
         setUnreadChat(0)
       }),
 

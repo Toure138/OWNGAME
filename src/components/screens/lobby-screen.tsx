@@ -82,6 +82,15 @@ export function LobbyScreen() {
         setWaitingOpponent(null)
       }),
       eventBus.on('game:started', () => setWaitingOpponent(null)),
+      // Partie disparue côté serveur (redémarrage du service) : le joueur est
+      // ramené ici, il faut lui dire pourquoi.
+      eventBus.on('game:lost', () => {
+        toast({
+          title: 'Partie interrompue',
+          description: 'Le serveur a redémarré et la partie en cours a été perdue.',
+          variant: 'destructive',
+        })
+      }),
     ]
     return () => offs.forEach(off => off())
   }, [setPendingInvite, toast])

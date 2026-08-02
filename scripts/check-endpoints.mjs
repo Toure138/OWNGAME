@@ -152,6 +152,30 @@ async function main() {
     expect: 401,
   })
 
+  // Le bourrage d'identifiants vise un compte précis, souvent depuis plusieurs
+  // adresses IP : la limite par compte doit finir par bloquer.
+  const victim = `cible-${stamp}@test.fr`
+  let blocked = false
+  for (let i = 0; i < 12; i++) {
+    const attempt = await call('POST', '/api/auth/login', {
+      body: { email: victim, password: `essai-${i}` },
+    })
+    if (attempt.status === 429) {
+      blocked = true
+      break
+    }
+  }
+  record(
+    blocked,
+    'POST   /api/auth/login                            le bourrage sur un compte est bloqué',
+    '12 tentatives sur la même adresse sans blocage'
+  )
+  // Une connexion valide doit rester possible depuis la même IP : la limite
+  // par adresse ne doit pas être si basse qu'elle punisse les autres joueurs.
+  await check('les autres comptes restent connectables', 'POST', '/api/auth/login', {
+    body: { email: playerOne.email, password: playerOne.password },
+  })
+
   await check('profil courant', 'GET', '/api/auth/me', { token: tokenA })
   await check('profil sans jeton refusé', 'GET', '/api/auth/me', { expect: 401 })
   await check('jeton falsifié refusé', 'GET', '/api/auth/me', {
@@ -238,6 +262,26 @@ async function main() {
     token: tokenA,
     expect: 404,
   })
+
+  // Suppression : ces méthodes sont utilisées par l'écran des notifications
+  // (croix sur chaque ligne et bouton « Tout effacer »).
+  const firstNotif = notifs.data.notifications?.[0]
+  if (firstNotif) {
+    await check('suppression d’une notification', 'DELETE', `/api/notifications?id=${firstNotif.id}`, {
+      token: tokenA,
+    })
+    await check('suppression déjà effectuée', 'DELETE', `/api/notifications?id=${firstNotif.id}`, {
+      token: tokenA,
+      expect: 404,
+    })
+  }
+  await check('suppression globale', 'DELETE', '/api/notifications?all=true', { token: tokenA })
+  const emptied = await call('GET', '/api/notifications', { token: tokenA })
+  record(
+    (emptied.data.notifications || []).length === 0,
+    'DELETE /api/notifications                         la liste est bien vidée',
+    `${(emptied.data.notifications || []).length} notification(s) restante(s)`
+  )
   await check('écriture directe de partie refusée', 'POST', '/api/games', {
     token: tokenA,
     body: { scoreA: 99999 },
@@ -439,6 +483,30 @@ async function main() {
     expect: 409,
   })
 
+  // Annulation d'un défi (bouton « Annuler » du salon), avant l'invitation
+  // qui mènera réellement à la partie.
+  const cancelled = await check('A défie B puis se ravise', 'POST', '/api/realtime/invite', {
+    token: tokenA,
+    body: { toUserId: idB },
+  })
+  await check('annulation du défi', 'DELETE', '/api/realtime/invite', {
+    token: tokenA,
+    body: { invitationId: cancelled.data.invitationId },
+  })
+  await check('annulation d’une invitation inconnue refusée', 'DELETE', '/api/realtime/invite', {
+    token: tokenA,
+    body: { invitationId: 'inexistante' },
+    expect: 404,
+  })
+  await check('un défi annulé n’est plus acceptable', 'POST', '/api/realtime/invite-respond', {
+    token: tokenB,
+    body: { invitationId: cancelled.data.invitationId, accept: true },
+    expect: 409,
+  })
+  // On vide la file d'événements de B : l'invitation annulée s'y trouve encore
+  // et fausserait l'attente de l'invitation suivante.
+  await call('POST', '/api/realtime/poll', { token: tokenB })
+
   const invite = await check('A défie B', 'POST', '/api/realtime/invite', {
     token: tokenA,
     body: { toUserId: idB, categoryFilter: null },
@@ -492,6 +560,31 @@ async function main() {
       token: tokenA,
       body: { gameId, content: 'Bonne chance !' },
     })
+
+    // Rechargement de page en pleine partie : le joueur doit reprendre sa
+    // place, et non perdre par abandon.
+    await call('POST', '/api/realtime/poll', { token: tokenB })
+    const resumed = await call('POST', '/api/realtime/join', { token: tokenB })
+    record(
+      !!resumed.data.currentGame,
+      'POST   /api/realtime/join                         recharger la page ne fait pas perdre la partie',
+      'currentGame absent : la partie a été abandonnée au rechargement'
+    )
+    record(
+      resumed.data.currentGame?.question?.text === questionData?.text,
+      'POST   /api/realtime/join                         la question courante est restituée',
+      "la reprise ne fournit pas la question en cours : l'écran resterait figé"
+    )
+    record(
+      (resumed.data.currentGame?.chat || []).some(m => m.content === 'Bonne chance !'),
+      'POST   /api/realtime/join                         l’historique du chat est restitué',
+      'chat vide après reprise'
+    )
+    record(
+      resumed.data.currentGame?.game?.status === 'IN_PROGRESS',
+      'POST   /api/realtime/join                         la partie reprise est toujours en cours',
+      `statut = ${resumed.data.currentGame?.game?.status}`
+    )
     await check('message vide refusé', 'POST', '/api/realtime/game-chat', {
       token: tokenA,
       body: { gameId, content: '   ' },

@@ -140,8 +140,15 @@ export function rateLimit(key: string, limit: number, windowMs: number): void {
   bucket.count++
   if (bucket.count > limit) {
     const seconds = Math.ceil((bucket.resetAt - now) / 1000)
-    throw new HttpError(429, `Trop de tentatives, réessayez dans ${seconds} s`)
+    const delay =
+      seconds >= 120 ? `${Math.ceil(seconds / 60)} minutes` : `${seconds} secondes`
+    throw new HttpError(429, `Trop de tentatives, réessayez dans ${delay}`)
   }
+}
+
+/** Remet un compteur à zéro, après une action légitime aboutie. */
+export function resetRateLimit(key: string): void {
+  buckets.delete(key)
 }
 
 // Purge périodique pour éviter que la table ne grossisse indéfiniment.

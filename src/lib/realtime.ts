@@ -436,17 +436,14 @@ export const realtime = {
     country: string,
     level: number
   ) {
-    // Un joueur qui recharge la page en pleine partie abandonne celle-ci.
+    // Recharger la page ne fait pas perdre la partie : le joueur reprend sa
+    // place dans la session en cours. L'abandon reste géré par `cleanupStale`,
+    // qui libère l'adversaire au bout de 30 s sans interrogation du serveur —
+    // c'est-à-dire lorsque le joueur est réellement parti.
     const existing = state.onlinePlayers.get(userId)
-    if (existing && existing.status === 'IN_GAME') {
-      const gameId = state.userToGame.get(userId)
-      const game = gameId ? state.games.get(gameId) : null
-      if (game && game.status === 'IN_PROGRESS') {
-        const winnerId =
-          userId === game.playerA.userId ? game.playerB.userId : game.playerA.userId
-        finishGame(game, winnerId, true)
-      }
-    }
+    const gameId = state.userToGame.get(userId)
+    const game = gameId ? state.games.get(gameId) : null
+    const resuming = !!game && game.status === 'IN_PROGRESS'
 
     const player: OnlinePlayer = {
       userId,
@@ -454,11 +451,20 @@ export const realtime = {
       avatarUrl: avatarUrl ?? null,
       country: country || 'France',
       level: level || 1,
-      status: 'AVAILABLE',
+      status: resuming ? 'IN_GAME' : 'AVAILABLE',
       lastPoll: Date.now(),
       joinedAt: existing?.joinedAt ?? Date.now(),
     }
     state.onlinePlayers.set(userId, player)
+
+    // La session référence les objets joueurs : sans cette réaffectation, elle
+    // continuerait de pointer sur l'ancienne instance et afficherait un pseudo
+    // ou un avatar périmé après une modification de profil.
+    if (resuming && game) {
+      if (game.playerA.userId === userId) game.playerA = player
+      else if (game.playerB.userId === userId) game.playerB = player
+    }
+
     broadcastPresence()
     // Le joueur qui vient d'arriver reçoit immédiatement la liste courante.
     return { player, players: presenceList() }
@@ -489,14 +495,43 @@ export const realtime = {
     return { events, online: !!player }
   },
 
-  /** Partie en cours pour ce joueur, s'il y en a une (reprise après rechargement). */
+  /**
+   * Partie en cours pour ce joueur, s'il y en a une (reprise après
+   * rechargement de la page). La question courante et l'historique du chat
+   * sont inclus : ces éléments ont été distribués sous forme d'événements déjà
+   * consommés, le client ne pourrait donc pas les reconstituer seul.
+   */
   currentGame(userId: string) {
     const gameId = state.userToGame.get(userId)
     const game = gameId ? state.games.get(gameId) : null
     if (!game || game.status !== 'IN_PROGRESS') return null
+
+    const q = game.questions[game.currentTurn]
+    // Aucune question à renvoyer entre deux tours (affichage du résultat) :
+    // la suivante arrivera d'elle-même par le flux d'événements.
+    const pending = q && !q.answered && game.questionStartedAt
+
     return {
       game: publicGame(game),
       youAre: game.playerA.userId === userId ? ('A' as const) : ('B' as const),
+      question: pending
+        ? {
+            gameId: game.id,
+            index: q.index,
+            total: game.questions.length,
+            text: q.text,
+            propositions: q.propositions,
+            categoryId: q.categoryId,
+            categoryName: q.categoryName,
+            difficulty: q.difficulty,
+            answeredBy: q.answeredBy,
+            timerSeconds: game.timerSeconds,
+            scoreA: game.scoreA,
+            scoreB: game.scoreB,
+            startedAt: game.questionStartedAt,
+          }
+        : null,
+      chat: game.chat.slice(-40),
     }
   },
 

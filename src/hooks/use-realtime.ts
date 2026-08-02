@@ -103,10 +103,25 @@ export function useRealtime() {
         const data = await res.json()
         store().setOnlinePlayers(data.players || [])
         store().setConnected(true)
+
         // Partie encore en cours côté serveur après un rechargement de page.
+        // L'historique du chat voyage dans la charge utile de `game:started`
+        // plutôt qu'en messages séparés : le tampon d'événements ne retient
+        // qu'un exemplaire par type et perdrait tout sauf le dernier message.
         if (data.currentGame) {
+          clearGameBuffer()
           eventBus.emit('game:started', data.currentGame)
+          if (data.currentGame.question) {
+            eventBus.emit('game:question', data.currentGame.question)
+          }
           store().setView('game')
+        } else if (store().view === 'game') {
+          // Le serveur ne connaît aucune partie alors que l'écran de jeu est
+          // affiché : la session a été perdue (redémarrage du service). Sans ce
+          // retour au salon, le joueur resterait devant un plateau figé.
+          clearGameBuffer()
+          store().setView('lobby')
+          eventBus.emit('game:lost', null)
         }
         return true
       } catch {
