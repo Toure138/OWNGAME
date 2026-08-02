@@ -15,10 +15,6 @@ const nextConfig: NextConfig = {
   // script (`npm run lint`).
   reactStrictMode: true,
 
-  // `sharp` optimise les images côté serveur ; il ne doit pas être embarqué
-  // dans le bundle mais résolu depuis node_modules à l'exécution.
-  serverExternalPackages: ['sharp'],
-
   images: {
     // Les joueurs peuvent renseigner l'URL d'un avatar hébergé n'importe où :
     // on sert ces images telles quelles plutôt que de les faire transiter par
