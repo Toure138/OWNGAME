@@ -30,6 +30,15 @@ services:
       - key: NODE_ENV
         value: production
 
+      # Indispensable. Le serveur autonome de Next.js se lie à
+      # `process.env.HOSTNAME || '0.0.0.0'`, et tout environnement conteneurisé
+      # — Render compris — renseigne HOSTNAME avec le nom du conteneur. Sans
+      # cette ligne, Next écoute sur une interface que le proxy de la
+      # plateforme ne peut pas joindre : le service est annoncé « live » mais
+      # répond 502.
+      - key: HOSTNAME
+        value: 0.0.0.0
+
       # Base SQLite. Sur le plan gratuit, le disque est réinitialisé à chaque
       # déploiement ou redémarrage : la base est alors recréée et re-peuplée
       # automatiquement au lancement. Pour conserver les comptes créés par les

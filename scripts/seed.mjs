@@ -178,7 +178,16 @@ async function main() {
 
   console.log('\n✅ Peuplement terminé.')
   if (adminCreated) {
-    console.log(`   Administrateur : ${ADMIN_EMAIL} / ${ADMIN_PASSWORD}`)
+    // Le mot de passe n'est jamais journalisé : cette sortie finit dans les
+    // journaux de la plateforme d'hébergement, qui les conserve et les expose
+    // à toute personne ayant accès au tableau de bord.
+    const provided = !!process.env.ADMIN_PASSWORD
+    console.log(`   Administrateur : ${ADMIN_EMAIL}`)
+    console.log(
+      provided
+        ? '   Mot de passe : celui fourni via ADMIN_PASSWORD'
+        : '   Mot de passe : admin123 — valeur par défaut, à changer sans tarder'
+    )
   }
   if (WITH_DEMO) {
     console.log('   Joueur de démonstration : player@demo.fr / demo123')

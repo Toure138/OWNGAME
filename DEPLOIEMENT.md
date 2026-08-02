@@ -45,7 +45,23 @@ Le premier déploiement prend environ 3 à 5 minutes. Au démarrage,
 | `ADMIN_PASSWORD`  | Son mot de passe — **choisissez-en un solide**                   |
 | `JWT_SECRET`      | Généré automatiquement par Render, ne rien saisir                |
 | `DATABASE_URL`    | Chemin du fichier SQLite (voir la section suivante)              |
+| `HOSTNAME`        | `0.0.0.0` — **ne pas retirer**, voir ci-dessous                  |
 | `SEED_DEMO_USERS` | `true` pour ajouter 15 joueurs de démonstration                  |
+
+### Pourquoi `HOSTNAME=0.0.0.0` est indispensable
+
+Le serveur autonome de Next.js se lie à `process.env.HOSTNAME || '0.0.0.0'`.
+Or Render, comme tout environnement conteneurisé, renseigne `HOSTNAME` avec le
+nom du conteneur. Sans cette variable, Next écoute sur une interface que le
+proxy de la plateforme ne peut pas joindre : le tableau de bord annonce
+« Your service is live 🎉 » et l'URL répond malgré tout **502**.
+
+Le symptôme est identifiable dans les journaux de démarrage :
+
+```
+- Network:  http://srv-xxxxx-hibernate-xxxxx:10000   ← anormal
+- Network:  http://0.0.0.0:10000                     ← attendu
+```
 
 Si `ADMIN_EMAIL` et `ADMIN_PASSWORD` ne sont pas renseignées, les valeurs par
 défaut (`admin@qvgdm.fr` / `admin123`) s'appliquent : **changez-les
