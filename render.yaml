@@ -16,7 +16,11 @@ services:
     # Une seule instance : l'état temps réel n'est pas partagé entre processus.
     numInstances: 1
 
-    buildCommand: npm ci && npm run build
+    # `--include=dev` est indispensable : NODE_ENV vaut production ci-dessous,
+    # et npm omet alors les devDependencies. Or Tailwind, son greffon PostCSS et
+    # TypeScript sont nécessaires pour construire l'application — ils ne le sont
+    # plus une fois le bundle autonome produit.
+    buildCommand: npm ci --include=dev && npm run build
     # prepare-db applique le schéma puis peuple la base si elle est vide.
     startCommand: npm run db:prepare && npm run start:prod
 

@@ -17,6 +17,7 @@
     "db:reset": "prisma migrate reset",
     "check:bank": "node scripts/check-bank.mjs",
     "check:endpoints": "node scripts/check-endpoints.mjs",
+    "check:deploy": "node scripts/check-deploy.mjs",
     "verify": "npm run typecheck && npm run check:bank"
   },
   "dependencies": {

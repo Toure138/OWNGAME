@@ -54,7 +54,19 @@ apparaissent dans le salon et peuvent se défier.
 | `npm run lint`            | ESLint                                                         |
 | `npm run check:bank`      | Contrôle qualité de la banque de questions                      |
 | `npm run check:endpoints` | Vérifie les 30 points d'entrée contre un serveur démarré        |
+| `npm run check:deploy`    | Rejoue un déploiement Render en local, avant de pousser         |
 | `npm run verify`          | `typecheck` + `check:bank`                                     |
+
+### Avant de pousser en production
+
+```bash
+npm run check:deploy
+```
+
+Le build local ne suffit pas à garantir un déploiement : il réutilise
+`node_modules` et ne positionne pas `NODE_ENV`. Ce script part des seuls
+fichiers suivis par git, installe depuis zéro avec `npm ci` et construit sous
+`NODE_ENV=production` — exactement ce que fait Render.
 
 ### Vérification des endpoints
 
