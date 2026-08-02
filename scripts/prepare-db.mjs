@@ -38,6 +38,14 @@ function runPrisma(args, label) {
 }
 
 async function main() {
+  // Contexte journalisé d'entrée : en cas d'échec au démarrage, la plateforme
+  // ne montre qu'une erreur 502 et ces quelques lignes sont le seul indice
+  // disponible pour comprendre ce qui a manqué.
+  console.log('── Préparation de la base ──────────────────────')
+  console.log(`  environnement : ${process.env.NODE_ENV || 'non défini'}`)
+  console.log(`  répertoire    : ${process.cwd()}`)
+  console.log(`  port          : ${process.env.PORT || 'non défini'}`)
+
   const url = process.env.DATABASE_URL
   if (!url) {
     console.error('❌ DATABASE_URL n’est pas définie.')
@@ -62,6 +70,12 @@ async function main() {
 }
 
 main().catch(e => {
-  console.error('❌ Préparation de la base impossible :', e.message)
+  // Le serveur n'est pas lancé si cette étape échoue : sans message explicite,
+  // le service reste injoignable sans que rien n'en explique la raison.
+  console.error('\n════════════════════════════════════════════════')
+  console.error('❌ PRÉPARATION DE LA BASE IMPOSSIBLE')
+  console.error('   Le serveur ne sera pas démarré.')
+  console.error('════════════════════════════════════════════════')
+  console.error(e?.stack || e?.message || e)
   process.exit(1)
 })
