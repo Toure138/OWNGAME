@@ -1,0 +1,109 @@
+// Prisma schema for "Qui veut gagner 20 millions ?"
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  phone         String?
+  passwordHash  String
+  pseudo        String
+  fullName      String?
+  country       String   @default("France")
+  avatarUrl     String?
+  role          String   @default("USER") // USER | ADMIN
+  level         Int      @default(1)
+  xp            Int      @default(0)
+  gamesPlayed   Int      @default(0)
+  wins          Int      @default(0)
+  losses        Int      @default(0)
+  totalScore    Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  gamesAsPlayerA Game[]   @relation("PlayerA")
+  gamesAsPlayerB Game[]   @relation("PlayerB")
+  notifications  Notification[]
+  achievements   Achievement[]
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String     @unique
+  description String?
+  icon        String?
+  color       String?
+  questions   Question[]
+  createdAt   DateTime   @default(now())
+}
+
+model Question {
+  id          String   @id @default(cuid())
+  text        String
+  propositionA String
+  propositionB String
+  propositionC String
+  propositionD String
+  correctAnswer String  // "A" | "B" | "C" | "D"
+  explanation String?
+  difficulty  String   @default("MEDIUM") // EASY | MEDIUM | HARD
+  categoryId  String
+  category    Category @relation(fields: [categoryId], references: [id])
+  timesAnswered Int    @default(0)
+  timesCorrect  Int    @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Game {
+  id            String   @id @default(cuid())
+  playerAId     String
+  playerBId     String
+  status        String   @default("WAITING") // WAITING | IN_PROGRESS | FINISHED
+  categoryFilter String? // null = ALL
+  questionsData String   // JSON: array of { questionId, text, propositions, correct, whoAnswered, answeredByA, answeredByB, correctA, correctB, timeA, timeB }
+  currentTurn   Int      @default(0) // 0..19
+  scoreA        Int      @default(0)
+  scoreB        Int      @default(0)
+  correctA      Int      @default(0)
+  correctB      Int      @default(0)
+  avgTimeA      Float    @default(0)
+  avgTimeB      Float    @default(0)
+  winnerId      String?
+  startedAt     DateTime?
+  finishedAt    DateTime?
+  createdAt     DateTime @default(now())
+
+  playerA User @relation("PlayerA", fields: [playerAId], references: [id])
+  playerB User @relation("PlayerB", fields: [playerBId], references: [id])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // INVITE | GAME_WON | GAME_LOST | RANK_UP | INFO
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Achievement {
+  id        String   @id @default(cuid())
+  userId    String
+  code      String   // FIRST_WIN | TEN_WINS | STREAK_3 | etc.
+  name      String
+  description String
+  unlockedAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([userId, code])
+}
