@@ -1,112 +1,125 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useApp } from '@/lib/store'
 import { startGame } from '@/hooks/use-realtime'
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Loader2, Swords } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { PlayerAvatar } from '@/components/ui/player-avatar'
+import { Loader2, Swords, Rocket } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 
-interface QuestionDTO {
-  id: string
-  text: string
-  propositionA: string
-  propositionB: string
-  propositionC: string
-  propositionD: string
-  correctAnswer: 'A' | 'B' | 'C' | 'D'
-  explanation?: string | null
-  categoryId: string
-}
-
 interface Props {
-  opponent: { opponentId: string; opponentPseudo: string; opponentAvatarUrl: string | null; categoryFilter: string | null }
+  opponent: {
+    opponentId: string
+    opponentPseudo: string
+    opponentAvatarUrl: string | null
+    categoryFilter: string | null
+  }
   onClose: () => void
 }
 
 export function GamePrepareModal({ opponent, onClose }: Props) {
   const user = useApp(s => s.user)!
   const token = useApp(s => s.token)!
-  const setView = useApp(s => s.setView)
   const { toast } = useToast()
   const [loading, setLoading] = useState(false)
+  const [categoryName, setCategoryName] = useState<string | null>(null)
 
-  async function startGameHandler() {
+  useEffect(() => {
+    if (!opponent.categoryFilter) return
+    fetch('/api/categories')
+      .then(r => r.json())
+      .then(d => {
+        const found = (d.categories || []).find(
+          (c: { id: string }) => c.id === opponent.categoryFilter
+        )
+        setCategoryName(found?.name ?? null)
+      })
+      .catch(() => setCategoryName(null))
+  }, [opponent.categoryFilter])
+
+  // Les questions sont tirées par le serveur : le client n'envoie que
+  // l'adversaire et la catégorie.
+  async function launch() {
     setLoading(true)
-    try {
-      const url = opponent.categoryFilter
-        ? `/api/questions/random?categoryId=${opponent.categoryFilter}&limit=20`
-        : `/api/questions/random?limit=20`
-      const res = await fetch(url)
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Erreur')
-      const questions: QuestionDTO[] = data.questions
-      if (questions.length < 5) {
-        throw new Error('Pas assez de questions dans cette catégorie (minimum 5)')
-      }
-
-      const r = await startGame(token, opponent.opponentId, opponent.categoryFilter, questions.map(q => ({
-        questionId: q.id,
-        text: q.text,
-        propositions: { A: q.propositionA, B: q.propositionB, C: q.propositionC, D: q.propositionD },
-        correct: q.correctAnswer,
-        explanation: q.explanation,
-        categoryId: q.categoryId,
-      })))
-
-      if (r.ok) {
-        toast({ title: 'Partie lancée !', description: 'Bonne chance 🎯' })
-        setView('game')
-        onClose()
-      } else {
-        throw new Error(r.error || 'Erreur')
-      }
-    } catch (e: any) {
-      toast({ title: 'Erreur', description: e.message, variant: 'destructive' })
+    const result = await startGame(token, opponent.opponentId, opponent.categoryFilter)
+    if (result.ok) {
+      toast({ title: 'Partie lancée', description: 'Bonne chance 🎯' })
+      onClose()
+    } else {
+      toast({
+        title: 'Impossible de lancer la partie',
+        description: result.error,
+        variant: 'destructive',
+      })
       setLoading(false)
     }
   }
 
   return (
-    <Dialog open={true} onOpenChange={() => !loading && onClose()}>
+    <Dialog open onOpenChange={() => !loading && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-orange-900">
-            <Swords className="w-5 h-5 text-orange-600" /> Adversaire prêt !
+          <DialogTitle className="flex items-center gap-2">
+            <Swords className="h-5 w-5 text-primary" /> Adversaire prêt
           </DialogTitle>
           <DialogDescription>
-            {opponent.opponentPseudo} a accepté votre défi. Lancez la partie !
+            {opponent.opponentPseudo} a accepté votre défi. Lancez la partie quand vous voulez.
           </DialogDescription>
         </DialogHeader>
-        <div className="flex items-center justify-center gap-4 p-6">
-          <div className="text-center">
-            <Avatar className="w-16 h-16 mx-auto mb-2">
-              <AvatarFallback className="bg-orange-200 text-orange-800 font-bold text-xl">
-                {user.pseudo.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <p className="font-semibold">{user.pseudo}</p>
-            <p className="text-xs text-muted-foreground">Niv. {user.level}</p>
-          </div>
-          <div className="text-2xl font-black text-orange-600">VS</div>
-          <div className="text-center">
-            <Avatar className="w-16 h-16 mx-auto mb-2">
-              <AvatarFallback className="bg-amber-200 text-amber-800 font-bold text-xl">
-                {opponent.opponentPseudo.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <p className="font-semibold">{opponent.opponentPseudo}</p>
-            <p className="text-xs text-muted-foreground">Adversaire</p>
-          </div>
+
+        <div className="flex items-center justify-center gap-6 py-5">
+          <PlayerSide name={user.pseudo} avatar={user.avatarUrl} caption={`Niveau ${user.level}`} />
+          <div className="text-2xl font-black text-primary">VS</div>
+          <PlayerSide
+            name={opponent.opponentPseudo}
+            avatar={opponent.opponentAvatarUrl}
+            caption="Adversaire"
+          />
         </div>
-        <DialogFooter>
-          <Button onClick={startGameHandler} disabled={loading} className="w-full bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white">
-            {loading ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" /> Préparation...</> : '🚀 Démarrer la partie'}
+
+        <div className="flex flex-wrap justify-center gap-2 text-xs">
+          <Badge variant="secondary">20 questions</Badge>
+          <Badge variant="secondary">20 s par question</Badge>
+          <Badge variant="secondary">
+            {opponent.categoryFilter ? (categoryName ?? 'Catégorie choisie') : 'Toutes catégories'}
+          </Badge>
+        </div>
+
+        <DialogFooter className="mt-2">
+          <Button onClick={launch} disabled={loading} size="lg" className="w-full gap-2">
+            {loading ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" /> Préparation…
+              </>
+            ) : (
+              <>
+                <Rocket className="h-4 w-4" /> Démarrer la partie
+              </>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  )
+}
+
+function PlayerSide({
+  name, avatar, caption,
+}: {
+  name: string
+  avatar?: string | null
+  caption: string
+}) {
+  return (
+    <div className="text-center">
+      <PlayerAvatar name={name} src={avatar} className="mx-auto mb-2 h-16 w-16 text-xl" />
+      <p className="max-w-[7rem] truncate font-semibold">{name}</p>
+      <p className="text-xs text-muted-foreground">{caption}</p>
+    </div>
   )
 }

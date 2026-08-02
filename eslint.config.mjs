@@ -19,6 +19,13 @@ const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
     // React rules
     "react-hooks/exhaustive-deps": "off",
     "react-hooks/purity": "off",
+    // Cette règle interdit tout appel synchrone à setState dans un effet. Deux
+    // usages parfaitement légitimes la déclenchent ici : le drapeau
+    // d'hydratation (le rendu serveur ne connaît pas la session stockée
+    // localement) et le `setLoading(true)` qui ouvre chaque chargement de
+    // données. La restructurer pour satisfaire la règle nuirait à la lisibilité
+    // sans rien corriger ; on la conserve en avertissement pour rester informé.
+    "react-hooks/set-state-in-effect": "warn",
     "react/no-unescaped-entities": "off",
     "react/display-name": "off",
     "react/prop-types": "off",

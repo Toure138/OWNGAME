@@ -1,51 +1,90 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useApp } from '@/lib/store'
-import { eventBus, answerQuestion as sendAnswer, sendChat as sendChatMsg, leaveGame as quitGame } from '@/hooks/use-realtime'
-
-function clearGameBuffer() {
-  eventBus.clearBuffer('game:started')
-  eventBus.clearBuffer('game:question')
-  eventBus.clearBuffer('game:question-result')
-  eventBus.clearBuffer('game:finished')
-}
+import {
+  eventBus,
+  clearGameBuffer,
+  answerQuestion,
+  sendChat as postChat,
+  leaveGame,
+} from '@/hooks/use-realtime'
+import { playSound } from '@/lib/sound'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { Input } from '@/components/ui/input'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Trophy, Clock, Send, MessageSquare, CheckCircle2, XCircle, LogOut } from 'lucide-react'
-import { useToast } from '@/hooks/use-toast'
+import { PlayerAvatar } from '@/components/ui/player-avatar'
+import { TimerRing } from '@/components/game/timer-ring'
+import { Confetti } from '@/components/game/confetti'
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog'
+import {
+  Trophy, Send, MessageSquare, CheckCircle2, XCircle, LogOut, Flame, Clock,
+  Eye, Lightbulb, Medal, Home, Crown,
+} from 'lucide-react'
+import { cn } from '@/lib/utils'
 
-interface PlayerInfo { userId: string; pseudo: string; avatarUrl: string | null; country: string; level: number }
-interface Question {
-  index: number
-  text: string
-  propositions: { A: string; B: string; C: string; D: string }
-  categoryId: string
-  answeredBy: 'A' | 'B'
-  timerSeconds: number
-  scoreA: number
-  scoreB: number
+type Choice = 'A' | 'B' | 'C' | 'D'
+const CHOICES: Choice[] = ['A', 'B', 'C', 'D']
+
+interface Player {
+  userId: string
+  pseudo: string
+  avatarUrl: string | null
+  country: string
+  level: number
 }
 
-interface QuestionResult {
-  questionIndex: number
-  correct: 'A' | 'B' | 'C' | 'D'
-  chosen: 'A' | 'B' | 'C' | 'D' | null
-  isCorrect: boolean
-  timeout?: boolean
+interface Game {
+  id: string
+  playerA: Player
+  playerB: Player
+  categoryFilter: string | null
+  totalQuestions: number
   scoreA: number
   scoreB: number
   correctA: number
   correctB: number
+  streakA: number
+  streakB: number
+  timerSeconds: number
+}
+
+interface Question {
+  index: number
+  total: number
+  text: string
+  propositions: Record<Choice, string>
+  categoryName?: string | null
+  difficulty?: string | null
+  answeredBy: 'A' | 'B'
+  timerSeconds: number
+  startedAt: number
+}
+
+interface Result {
+  questionIndex: number
+  correct: Choice
+  chosen: Choice | null
+  isCorrect: boolean
+  timeout?: boolean
+  points: number
+  explanation?: string | null
+  scoreA: number
+  scoreB: number
+  correctA: number
+  correctB: number
+  streakA: number
+  streakB: number
   answeredBy: 'A' | 'B'
 }
 
-interface GameSummary {
+interface Summary {
   gameId: string
   winnerId: string | null
   scoreA: number
@@ -54,17 +93,23 @@ interface GameSummary {
   correctB: number
   avgTimeA: number
   avgTimeB: number
+  bestStreakA: number
+  bestStreakB: number
+  totalQuestions: number
   forfeit: boolean
+  youAre: 'A' | 'B'
+  playerA: Player
+  playerB: Player
   questions: Array<{
     index: number
     text: string
-    propositions: any
-    correct: 'A' | 'B' | 'C' | 'D'
-    chosen: 'A' | 'B' | 'C' | 'D' | null
+    propositions: Record<Choice, string>
+    correct: Choice
+    chosen: Choice | null
     answeredBy: 'A' | 'B'
     correctA: boolean | null
     correctB: boolean | null
-    explanation?: string
+    explanation?: string | null
   }>
 }
 
@@ -76,132 +121,172 @@ interface ChatMsg {
   timestamp: number
 }
 
+const DIFFICULTY_LABEL: Record<string, string> = {
+  EASY: 'Facile',
+  MEDIUM: 'Moyen',
+  HARD: 'Difficile',
+}
+
 export function GameScreen() {
   const user = useApp(s => s.user)!
   const token = useApp(s => s.token)!
   const setView = useApp(s => s.setView)
-  const { toast } = useToast()
+  const soundEnabled = useApp(s => s.soundEnabled)
 
-  const [game, setGame] = useState<any>(null)
+  const [game, setGame] = useState<Game | null>(null)
   const [youAre, setYouAre] = useState<'A' | 'B'>('A')
   const [question, setQuestion] = useState<Question | null>(null)
-  const [result, setResult] = useState<QuestionResult | null>(null)
-  const [summary, setSummary] = useState<GameSummary | null>(null)
+  const [result, setResult] = useState<Result | null>(null)
+  const [summary, setSummary] = useState<Summary | null>(null)
   const [timeLeft, setTimeLeft] = useState(20)
-  const [chosen, setChosen] = useState<'A' | 'B' | 'C' | 'D' | null>(null)
+  const [chosen, setChosen] = useState<Choice | null>(null)
   const [chat, setChat] = useState<ChatMsg[]>([])
   const [chatInput, setChatInput] = useState('')
-  const questionStartRef = useRef<number>(0)
-  const chatScrollRef = useRef<HTMLDivElement>(null)
-  const gameRef = useRef<any>(null)
-  const tokenRef = useRef<string>('')
+  const [unreadChat, setUnreadChat] = useState(0)
 
-  useEffect(() => { gameRef.current = game }, [game])
-  useEffect(() => { tokenRef.current = token }, [token])
-
-  // Listen for game events via the event bus (registered once)
+  const chatBoxRef = useRef<HTMLDivElement>(null)
+  const soundRef = useRef(soundEnabled)
   useEffect(() => {
-    const offs: Array<() => void> = []
+    soundRef.current = soundEnabled
+  }, [soundEnabled])
 
-    offs.push(eventBus.on('game:started', (data: any) => {
-      // Clear any buffered events from a previous game
-      eventBus.clearBuffer('game:question')
-      eventBus.clearBuffer('game:question-result')
-      eventBus.clearBuffer('game:finished')
-      setGame(data.game)
-      setYouAre(data.youAre)
-      setChat([])
-      setSummary(null)
-      setQuestion(null)
-      setResult(null)
-      setChosen(null)
-    }))
+  // --- Réception des événements de partie ------------------------------------
+  useEffect(() => {
+    const offs = [
+      eventBus.on('game:started', data => {
+        const payload = data as { game: Game; youAre: 'A' | 'B' }
+        setGame(payload.game)
+        setYouAre(payload.youAre)
+        setSummary(null)
+        setQuestion(null)
+        setResult(null)
+        setChosen(null)
+        setChat([])
+        setUnreadChat(0)
+      }),
 
-    offs.push(eventBus.on('game:question', (q: any) => {
-      setQuestion(q)
-      setResult(null)
-      setChosen(null)
-      setTimeLeft(q.timerSeconds)
-      questionStartRef.current = Date.now()
-    }))
+      eventBus.on('game:question', data => {
+        const q = data as Question
+        setQuestion(q)
+        setResult(null)
+        setChosen(null)
+        // Le temps restant est calculé depuis l'horodatage serveur : un client
+        // qui a pris du retard reste synchronisé avec l'adversaire.
+        const elapsed = (Date.now() - q.startedAt) / 1000
+        setTimeLeft(Math.max(0, Math.round(q.timerSeconds - elapsed)))
+      }),
 
-    offs.push(eventBus.on('game:question-result', (r: QuestionResult) => {
-      setResult(r)
-      setQuestion(prev => prev ? { ...prev, scoreA: r.scoreA, scoreB: r.scoreB } : null)
-      setGame((prev: any) => prev ? { ...prev, scoreA: r.scoreA, scoreB: r.scoreB, correctA: r.correctA, correctB: r.correctB } : prev)
-    }))
+      eventBus.on('game:question-result', data => {
+        const r = data as Result
+        setResult(r)
+        setGame(prev =>
+          prev
+            ? {
+                ...prev,
+                scoreA: r.scoreA,
+                scoreB: r.scoreB,
+                correctA: r.correctA,
+                correctB: r.correctB,
+                streakA: r.streakA,
+                streakB: r.streakB,
+              }
+            : prev
+        )
+      }),
 
-    offs.push(eventBus.on('game:finished', (s: GameSummary) => {
-      setSummary(s)
-      setQuestion(null)
-      setResult(null)
-      const g = gameRef.current
-      const tk = tokenRef.current
-      if (g) {
-        fetch('/api/games', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            playerAId: g.playerA.userId,
-            playerBId: g.playerB.userId,
-            categoryFilter: g.categoryFilter,
-            questionsData: s.questions,
-            scoreA: s.scoreA,
-            scoreB: s.scoreB,
-            correctA: s.correctA,
-            correctB: s.correctB,
-            avgTimeA: s.avgTimeA,
-            avgTimeB: s.avgTimeB,
-            winnerId: s.winnerId,
-          }),
-        }).then(() => {
-          fetch('/api/auth/me', { headers: { Authorization: `Bearer ${tk}` } })
-            .then(r => r.json())
-            .then(d => { if (d.user) useApp.getState().updateUser(d.user) })
-        })
-      }
-    }))
+      eventBus.on('game:finished', data => {
+        const s = data as Summary
+        setSummary(s)
+        setQuestion(null)
+        setResult(null)
+      }),
 
-    offs.push(eventBus.on('game:chat:message', (m: ChatMsg) => {
-      setChat(prev => [...prev, m])
-    }))
+      eventBus.on('game:chat:message', data => {
+        const m = data as ChatMsg
+        setChat(prev => [...prev, m])
+        if (m.senderId !== user.id) setUnreadChat(n => n + 1)
+      }),
+    ]
+    return () => offs.forEach(off => off())
+  }, [user.id])
 
-    return () => { offs.forEach(off => off()) }
-  }, [])
+  // --- Sons liés au résultat de la question courante --------------------------
+  const myTurn = question?.answeredBy === youAre
+  useEffect(() => {
+    if (!result || !soundRef.current) return
+    if (result.answeredBy !== youAre) return
+    playSound(result.timeout ? 'timeout' : result.isCorrect ? 'correct' : 'wrong')
+  }, [result, youAre])
 
-  // Countdown timer
+  useEffect(() => {
+    if (!summary || !soundRef.current) return
+    const won = summary.winnerId === user.id
+    playSound(won ? 'victory' : 'defeat')
+  }, [summary, user.id])
+
+  // --- Compte à rebours -------------------------------------------------------
   useEffect(() => {
     if (!question || result) return
     if (timeLeft <= 0) return
-    const t = setTimeout(() => setTimeLeft(timeLeft - 1), 1000)
-    return () => clearTimeout(t)
+    const id = setTimeout(() => setTimeLeft(t => Math.max(0, t - 1)), 1000)
+    return () => clearTimeout(id)
   }, [question, result, timeLeft])
 
-  // Auto-scroll chat
+  // Tic sonore sur les cinq dernières secondes, uniquement pour le joueur
+  // dont c'est le tour : l'adversaire n'a rien à faire.
   useEffect(() => {
-    if (chatScrollRef.current) {
-      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight
-    }
+    if (!question || result || !myTurn || chosen) return
+    if (timeLeft > 0 && timeLeft <= 5 && soundRef.current) playSound('tick')
+  }, [timeLeft, question, result, myTurn, chosen])
+
+  useEffect(() => {
+    if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight
   }, [chat])
 
-  async function answer(choice: 'A' | 'B' | 'C' | 'D') {
-    if (!question || result || chosen) return
-    if (question.answeredBy !== youAre) return
-    setChosen(choice)
-    const responseTime = Date.now() - questionStartRef.current
-    await sendAnswer(token, game.id, choice, responseTime)
-  }
+  // --- Actions ----------------------------------------------------------------
+  const answer = useCallback(
+    async (choice: Choice) => {
+      if (!game || !question || result || chosen) return
+      if (question.answeredBy !== youAre) return
+      setChosen(choice)
+      if (soundRef.current) playSound('click')
+      const elapsed = Date.now() - question.startedAt
+      const res = await answerQuestion(token, game.id, choice, Math.max(0, Math.round(elapsed)))
+      // Réponse refusée (temps écoulé côté serveur) : on rend la main pour que
+      // l'interface ne reste pas bloquée sur un choix qui n'a pas été pris.
+      if (!res.ok) setChosen(null)
+    },
+    [game, question, result, chosen, youAre, token]
+  )
 
-  async function sendChat() {
-    if (!chatInput.trim() || !game) return
-    await sendChatMsg(token, game.id, chatInput.trim())
+  // Raccourcis clavier : 1-4 ou A-D pour répondre.
+  useEffect(() => {
+    if (!myTurn || result || chosen) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      const key = e.key.toUpperCase()
+      const byLetter = CHOICES.indexOf(key as Choice)
+      const byDigit = ['1', '2', '3', '4'].indexOf(key)
+      const index = byLetter >= 0 ? byLetter : byDigit
+      if (index >= 0) {
+        e.preventDefault()
+        void answer(CHOICES[index])
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [myTurn, result, chosen, answer])
+
+  async function submitChat() {
+    const content = chatInput.trim()
+    if (!content || !game) return
     setChatInput('')
+    await postChat(token, game.id, content)
   }
 
   async function forfeit() {
     if (!game) return
-    if (!confirm('Quitter la partie ? Elle sera comptée comme une défaite.')) return
-    await quitGame(token, game.id)
+    await leaveGame(token, game.id)
     setView('lobby')
   }
 
@@ -212,74 +297,25 @@ export function GameScreen() {
     setView('lobby')
   }
 
-  // ----- Summary screen -----
+  // --- Écran de fin -----------------------------------------------------------
   if (summary) {
-    const won = summary.winnerId === user.id
-    const draw = !summary.winnerId
-    const myScore = youAre === 'A' ? summary.scoreA : summary.scoreB
-    const oppScore = youAre === 'A' ? summary.scoreB : summary.scoreA
-    const myCorrect = youAre === 'A' ? summary.correctA : summary.correctB
-    const oppCorrect = youAre === 'A' ? summary.correctB : summary.correctA
-    const myAvg = youAre === 'A' ? summary.avgTimeA : summary.avgTimeB
-    const oppAvg = youAre === 'A' ? summary.avgTimeB : summary.avgTimeA
-    const opponent = youAre === 'A' ? game?.playerB : game?.playerA
-
-    return (
-      <div className="container mx-auto p-4 max-w-4xl">
-        <Card className="border-orange-200 shadow-2xl overflow-hidden">
-          <div className={`p-8 text-center text-white ${won ? 'bg-gradient-to-br from-amber-500 to-orange-600' : draw ? 'bg-gradient-to-br from-slate-500 to-slate-700' : 'bg-gradient-to-br from-rose-500 to-red-700'}`}>
-            <Trophy className="w-16 h-16 mx-auto mb-3" />
-            <h2 className="text-4xl font-black mb-2">{won ? 'Victoire !' : draw ? 'Match nul' : 'Défaite'}</h2>
-            <p className="text-lg opacity-90">{summary.forfeit ? 'Partie abandonnée' : 'Partie terminée'}</p>
-          </div>
-          <CardContent className="p-6">
-            <div className="grid sm:grid-cols-2 gap-4 mb-6">
-              <PlayerScoreCard name={user.pseudo} score={myScore} correct={myCorrect} avgTime={myAvg} isWinner={won} isMe />
-              <PlayerScoreCard name={opponent?.pseudo || 'Adversaire'} score={oppScore} correct={oppCorrect} avgTime={oppAvg} isWinner={!won && !draw} />
-            </div>
-
-            <h3 className="font-bold text-lg mb-3 text-orange-900">Détail des questions</h3>
-            <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-              {summary.questions.map((q, i) => {
-                const wasMyTurn = (youAre === 'A' && q.answeredBy === 'A') || (youAre === 'B' && q.answeredBy === 'B')
-                const myResult = youAre === 'A' ? q.correctA : q.correctB
-                return (
-                  <div key={i} className={`p-3 rounded-lg border ${wasMyTurn ? 'border-orange-300 bg-orange-50' : 'border-slate-200 bg-slate-50'}`}>
-                    <div className="flex items-start justify-between gap-2 mb-1">
-                      <p className="text-sm font-medium">Q{i + 1}. {q.text}</p>
-                      <Badge variant="outline" className="text-xs shrink-0">{wasMyTurn ? 'Vous' : 'Adversaire'}</Badge>
-                    </div>
-                    <p className="text-xs text-muted-foreground mb-1">Bonne réponse : <span className="font-semibold text-green-700">{q.propositions[q.correct]}</span></p>
-                    {wasMyTurn && (
-                      <p className={`text-xs font-medium ${myResult ? 'text-green-600' : 'text-red-600'}`}>
-                        {myResult ? '✓ Correct' : q.chosen ? `✗ Vous avez répondu : ${q.propositions[q.chosen]}` : '✗ Pas répondu'}
-                      </p>
-                    )}
-                    {q.explanation && <p className="text-xs text-muted-foreground italic mt-1">💡 {q.explanation}</p>}
-                  </div>
-                )
-              })}
-            </div>
-
-            <div className="flex gap-2 mt-6">
-              <Button onClick={backToLobby} className="flex-1 bg-orange-600 hover:bg-orange-700">Retour au salon</Button>
-              <Button variant="outline" onClick={() => setView('leaderboard')}>Voir le classement</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
+    return <GameSummary summary={summary} userId={user.id} onBack={backToLobby} onLeaderboard={() => setView('leaderboard')} />
   }
 
+  // --- Aucune partie en cours -------------------------------------------------
   if (!game) {
     return (
-      <div className="container mx-auto p-4 max-w-2xl">
+      <div className="container mx-auto max-w-lg px-4">
         <Card>
-          <CardContent className="p-12 text-center">
-            <Trophy className="w-16 h-16 mx-auto mb-4 text-orange-500 animate-pulse" />
-            <h2 className="text-2xl font-bold mb-2 text-orange-900">En attente d'une partie...</h2>
-            <p className="text-muted-foreground">Retournez au salon pour défier un joueur.</p>
-            <Button onClick={() => setView('lobby')} className="mt-4 bg-orange-600 hover:bg-orange-700">Aller au salon</Button>
+          <CardContent className="p-10 text-center">
+            <Trophy className="mx-auto mb-4 h-14 w-14 animate-pulse text-primary" />
+            <h2 className="text-xl font-bold">Aucune partie en cours</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Retournez au salon pour défier un adversaire.
+            </p>
+            <Button onClick={() => setView('lobby')} className="mt-5 gap-2">
+              <Home className="h-4 w-4" /> Aller au salon
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -287,114 +323,303 @@ export function GameScreen() {
   }
 
   const me = youAre === 'A' ? game.playerA : game.playerB
-  const opp = youAre === 'A' ? game.playerB : game.playerA
+  const opponent = youAre === 'A' ? game.playerB : game.playerA
   const myScore = youAre === 'A' ? game.scoreA : game.scoreB
   const oppScore = youAre === 'A' ? game.scoreB : game.scoreA
-  const myCorrect = youAre === 'A' ? game.correctA || 0 : game.correctB || 0
-  const oppCorrect = youAre === 'A' ? game.correctB || 0 : game.correctA || 0
-  const myTurn = question?.answeredBy === youAre
-  const timerPct = question ? (timeLeft / question.timerSeconds) * 100 : 0
+  const myCorrect = youAre === 'A' ? game.correctA : game.correctB
+  const oppCorrect = youAre === 'A' ? game.correctB : game.correctA
+  const myStreak = youAre === 'A' ? game.streakA : game.streakB
+  const questionNumber = question ? question.index + 1 : 0
+  const progress = (questionNumber / game.totalQuestions) * 100
 
   return (
-    <div className="container mx-auto p-3 max-w-6xl">
-      <Card className="mb-3 border-orange-200">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-between gap-4">
-            <PlayerMini name={me.pseudo} avatar={me.avatarUrl} level={me.level} score={myScore} correct={myCorrect} isMe highlight={myTurn} />
-            <div className="text-center">
-              <p className="text-xs text-muted-foreground">Question</p>
-              <p className="text-2xl font-black text-orange-900">{question ? `${question.index + 1}` : '?'}/20</p>
-              <Button variant="ghost" size="sm" onClick={forfeit} className="mt-1 text-red-600 hover:text-red-700">
-                <LogOut className="w-3 h-3 mr-1" /> Abandonner
-              </Button>
+    <div className="container mx-auto max-w-6xl px-3 sm:px-4">
+      {/* Tableau de score */}
+      <Card className="mb-3">
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex items-center justify-between gap-2">
+            <ScorePanel
+              player={me}
+              score={myScore}
+              correct={myCorrect}
+              streak={myStreak}
+              isMe
+              active={myTurn}
+            />
+
+            <div className="shrink-0 text-center">
+              <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Question</p>
+              <p className="text-xl font-black tabular-nums sm:text-2xl">
+                {questionNumber || '—'}
+                <span className="text-sm font-medium text-muted-foreground">
+                  /{game.totalQuestions}
+                </span>
+              </p>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button variant="ghost" size="sm" className="mt-0.5 h-7 gap-1 text-destructive">
+                    <LogOut className="h-3 w-3" />
+                    <span className="text-xs">Abandonner</span>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>Abandonner la partie ?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      La victoire sera attribuée à {opponent.pseudo} et la partie comptera comme
+                      une défaite dans vos statistiques.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Continuer à jouer</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={forfeit}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Abandonner
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </div>
-            <PlayerMini name={opp.pseudo} avatar={opp.avatarUrl} level={opp.level} score={oppScore} correct={oppCorrect} highlight={!myTurn && !!question} />
+
+            <ScorePanel
+              player={opponent}
+              score={oppScore}
+              correct={oppCorrect}
+              streak={youAre === 'A' ? game.streakB : game.streakA}
+              align="right"
+              active={!!question && !myTurn}
+            />
           </div>
+          <Progress value={progress} className="mt-3 h-1.5" />
         </CardContent>
       </Card>
 
-      <div className="grid lg:grid-cols-3 gap-3">
-        <div className="lg:col-span-2 space-y-3">
+      <div className="grid gap-3 lg:grid-cols-3">
+        {/* Question */}
+        <div className="lg:col-span-2">
           {question ? (
-            <Card>
-              <CardContent className="p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <Badge variant={myTurn ? 'default' : 'secondary'} className={myTurn ? 'bg-orange-600' : ''}>
-                    {myTurn ? '🎯 À vous de jouer' : '⏳ Tour de l\'adversaire'}
-                  </Badge>
-                  <div className="flex items-center gap-2">
-                    <Clock className={`w-5 h-5 ${timeLeft <= 5 ? 'text-red-500 animate-pulse' : 'text-orange-600'}`} />
-                    <span className={`text-xl font-bold ${timeLeft <= 5 ? 'text-red-500' : 'text-orange-900'}`}>{timeLeft}s</span>
+            <Card className={cn(myTurn && timeLeft <= 5 && !result && 'animate-urgent')}>
+              <CardContent className="p-4 sm:p-6">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge variant={myTurn ? 'default' : 'secondary'} className="gap-1">
+                      {myTurn ? (
+                        <>
+                          <Flame className="h-3 w-3" /> À vous de jouer
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="h-3 w-3" /> Tour de {opponent.pseudo}
+                        </>
+                      )}
+                    </Badge>
+                    {question.categoryName && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {question.categoryName}
+                      </Badge>
+                    )}
+                    {question.difficulty && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {DIFFICULTY_LABEL[question.difficulty] ?? question.difficulty}
+                      </Badge>
+                    )}
                   </div>
+                  <TimerRing
+                    remaining={timeLeft}
+                    total={question.timerSeconds}
+                    size={68}
+                    className="shrink-0"
+                  />
                 </div>
-                <Progress value={timerPct} className="h-2 mb-6" />
-                <h2 className="text-xl sm:text-2xl font-bold mb-6 text-slate-900">{question.text}</h2>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  {(['A', 'B', 'C', 'D'] as const).map(letter => {
-                    const isSelected = chosen === letter
-                    const isCorrect = result && letter === result.correct
-                    const isWrong = result && isSelected && !result.isCorrect
-                    let className = 'justify-start text-left h-auto py-4 px-4 text-base border-2 '
-                    if (result) {
-                      if (isCorrect) className += 'border-green-500 bg-green-50 text-green-900'
-                      else if (isWrong) className += 'border-red-500 bg-red-50 text-red-900'
-                      else className += 'border-slate-200 opacity-60'
-                    } else if (isSelected) {
-                      className += 'border-orange-500 bg-orange-50'
-                    } else {
-                      className += 'border-slate-200 hover:border-orange-400 hover:bg-orange-50'
-                    }
-                    const disabled = !!result || !!chosen || !myTurn
+
+                <h2 className="animate-in-up mb-5 text-lg font-bold leading-snug sm:text-xl">
+                  {question.text}
+                </h2>
+
+                <div className="grid gap-2.5 sm:grid-cols-2">
+                  {CHOICES.map((letter, i) => {
+                    const isChosen = chosen === letter
+                    const isRight = result && letter === result.correct
+                    const isWrongPick = result && result.chosen === letter && !result.isCorrect
+
                     return (
-                      <Button key={letter} variant="outline" className={className} disabled={disabled} onClick={() => answer(letter)}>
-                        <span className="w-8 h-8 rounded-full bg-orange-100 text-orange-700 font-bold flex items-center justify-center mr-3 shrink-0">{letter}</span>
-                        <span className="flex-1">{question.propositions[letter]}</span>
-                        {result && isCorrect && <CheckCircle2 className="w-5 h-5 text-green-600 ml-2" />}
-                        {result && isWrong && <XCircle className="w-5 h-5 text-red-600 ml-2" />}
-                      </Button>
+                      <button
+                        key={letter}
+                        onClick={() => answer(letter)}
+                        disabled={!!result || !!chosen || !myTurn}
+                        className={cn(
+                          'group flex min-h-[3.5rem] items-center gap-3 rounded-xl border-2 p-3 text-left transition-all',
+                          'disabled:cursor-not-allowed',
+                          result
+                            ? isRight
+                              ? 'border-emerald-500 bg-emerald-500/10'
+                              : isWrongPick
+                                ? 'animate-shake border-destructive bg-destructive/10'
+                                : 'border-border opacity-50'
+                            : isChosen
+                              ? 'border-primary bg-primary/10'
+                              : myTurn
+                                ? 'border-border hover:border-primary hover:bg-accent active:scale-[0.99]'
+                                : 'border-border opacity-70'
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold transition-colors',
+                            result && isRight
+                              ? 'bg-emerald-500 text-white'
+                              : result && isWrongPick
+                                ? 'bg-destructive text-destructive-foreground'
+                                : isChosen
+                                  ? 'bg-primary text-primary-foreground'
+                                  : 'bg-muted text-muted-foreground group-hover:bg-primary/15 group-hover:text-primary'
+                          )}
+                        >
+                          {letter}
+                        </span>
+                        <span className="flex-1 text-sm sm:text-base">
+                          {question.propositions[letter]}
+                        </span>
+                        {result && isRight && (
+                          <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-500" />
+                        )}
+                        {result && isWrongPick && (
+                          <XCircle className="h-5 w-5 shrink-0 text-destructive" />
+                        )}
+                        {/* Rappel du raccourci, sans encombrer sur mobile */}
+                        {!result && myTurn && (
+                          <kbd className="hidden shrink-0 rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground sm:inline-block">
+                            {i + 1}
+                          </kbd>
+                        )}
+                      </button>
                     )
                   })}
                 </div>
+
                 {result && (
-                  <div className={`mt-4 p-3 rounded-lg ${result.isCorrect ? 'bg-green-50 text-green-800' : 'bg-red-50 text-red-800'}`}>
-                    <p className="font-semibold">{result.timeout ? '⏱️ Temps écoulé !' : result.isCorrect ? '✓ Bonne réponse !' : '✗ Mauvaise réponse'}</p>
-                    <p className="text-sm mt-1">La bonne réponse était : <strong>{question.propositions[result.correct]}</strong></p>
+                  <div
+                    className={cn(
+                      'animate-in-up mt-4 rounded-xl border p-3.5',
+                      result.answeredBy === youAre
+                        ? result.isCorrect
+                          ? 'border-emerald-500/40 bg-emerald-500/10'
+                          : 'border-destructive/40 bg-destructive/10'
+                        : 'bg-muted/50'
+                    )}
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="font-semibold">
+                        {result.timeout
+                          ? '⏱️ Temps écoulé'
+                          : result.isCorrect
+                            ? '✓ Bonne réponse'
+                            : '✗ Mauvaise réponse'}
+                        {result.answeredBy !== youAre && (
+                          <span className="ml-1 font-normal text-muted-foreground">
+                            (pour {opponent.pseudo})
+                          </span>
+                        )}
+                      </p>
+                      {result.points > 0 && result.answeredBy === youAre && (
+                        <Badge className="animate-pop bg-emerald-500 text-white hover:bg-emerald-500">
+                          +{result.points} pts
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="mt-1 text-sm">
+                      Réponse attendue :{' '}
+                      <strong>{question.propositions[result.correct]}</strong>
+                    </p>
+                    {result.explanation && (
+                      <p className="mt-2 flex gap-1.5 text-sm text-muted-foreground">
+                        <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+                        {result.explanation}
+                      </p>
+                    )}
                   </div>
+                )}
+
+                {!myTurn && !result && (
+                  <p className="mt-4 text-center text-sm text-muted-foreground">
+                    {opponent.pseudo} réfléchit… vous reprenez la main à la question suivante.
+                  </p>
                 )}
               </CardContent>
             </Card>
           ) : (
             <Card>
               <CardContent className="p-12 text-center">
-                <Trophy className="w-12 h-12 mx-auto mb-3 text-orange-500 animate-pulse" />
-                <p className="text-muted-foreground">En attente de la prochaine question...</p>
+                <Trophy className="mx-auto mb-3 h-12 w-12 animate-pulse text-primary" />
+                <p className="text-muted-foreground">Question suivante…</p>
               </CardContent>
             </Card>
           )}
         </div>
 
-        <Card className="lg:col-span-1 flex flex-col h-[60vh] lg:h-auto">
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base text-orange-900"><MessageSquare className="w-4 h-4" /> Chat</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-1 flex flex-col gap-2 min-h-0">
-            <div ref={chatScrollRef} className="flex-1 overflow-y-auto space-y-2 pr-1 min-h-0 max-h-48 lg:max-h-none">
+        {/* Chat */}
+        <Card className="flex flex-col lg:max-h-[calc(100vh-14rem)]">
+          <div className="flex items-center justify-between border-b p-3">
+            <p className="flex items-center gap-2 text-sm font-semibold">
+              <MessageSquare className="h-4 w-4" /> Discussion
+            </p>
+            {unreadChat > 0 && (
+              <Badge variant="secondary" className="text-[10px]">
+                {unreadChat} nouveau{unreadChat > 1 ? 'x' : ''}
+              </Badge>
+            )}
+          </div>
+
+          <CardContent className="flex min-h-0 flex-1 flex-col gap-2 p-3">
+            <div
+              ref={chatBoxRef}
+              onClick={() => setUnreadChat(0)}
+              className="max-h-40 min-h-0 flex-1 space-y-2 overflow-y-auto pr-1 lg:max-h-none"
+            >
               {chat.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-4">Aucun message. Soyez fair-play !</p>
+                <p className="py-6 text-center text-xs text-muted-foreground">
+                  Aucun message. Restez fair-play !
+                </p>
               ) : (
-                chat.map(m => (
-                  <div key={m.id} className={`text-sm ${m.senderId === user.id ? 'text-right' : ''}`}>
-                    <span className={`inline-block px-3 py-1.5 rounded-lg ${m.senderId === user.id ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-900'}`}>
-                      {m.senderId !== user.id && <span className="text-xs font-semibold block opacity-70 mb-0.5">{m.senderPseudo}</span>}
-                      {m.content}
-                    </span>
-                  </div>
-                ))
+                chat.map(m => {
+                  const mine = m.senderId === user.id
+                  return (
+                    <div key={m.id} className={cn('flex', mine && 'justify-end')}>
+                      <div
+                        className={cn(
+                          'max-w-[85%] rounded-2xl px-3 py-1.5 text-sm',
+                          mine
+                            ? 'rounded-br-sm bg-primary text-primary-foreground'
+                            : 'rounded-bl-sm bg-muted'
+                        )}
+                      >
+                        {!mine && (
+                          <span className="mb-0.5 block text-[10px] font-semibold opacity-70">
+                            {m.senderPseudo}
+                          </span>
+                        )}
+                        <span className="break-words">{m.content}</span>
+                      </div>
+                    </div>
+                  )
+                })
               )}
             </div>
+
             <div className="flex gap-2">
-              <Input value={chatInput} onChange={e => setChatInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendChat()} placeholder="Message..." className="text-sm" maxLength={500} />
-              <Button size="icon" onClick={sendChat} className="bg-orange-600 hover:bg-orange-700 shrink-0"><Send className="w-4 h-4" /></Button>
+              <Input
+                value={chatInput}
+                onChange={e => setChatInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && submitChat()}
+                placeholder="Votre message…"
+                maxLength={300}
+                className="text-sm"
+              />
+              <Button size="icon" onClick={submitChat} disabled={!chatInput.trim()} className="shrink-0">
+                <Send className="h-4 w-4" />
+              </Button>
             </div>
           </CardContent>
         </Card>
@@ -403,35 +628,233 @@ export function GameScreen() {
   )
 }
 
-function PlayerMini({ name, avatar, level, score, correct, isMe, highlight }: { name: string; avatar: string | null; level: number; score: number; correct: number; isMe?: boolean; highlight?: boolean }) {
+// ---------------------------------------------------------------------------
+
+function ScorePanel({
+  player, score, correct, streak, isMe, active, align = 'left',
+}: {
+  player: Player
+  score: number
+  correct: number
+  streak: number
+  isMe?: boolean
+  active?: boolean
+  align?: 'left' | 'right'
+}) {
   return (
-    <div className={`flex items-center gap-3 p-2 rounded-lg transition-colors ${highlight ? 'bg-orange-100 ring-2 ring-orange-400' : ''}`}>
-      <Avatar className="w-10 h-10 sm:w-12 sm:h-12">
-        <AvatarFallback className="bg-orange-200 text-orange-800 font-bold">{name.slice(0, 2).toUpperCase()}</AvatarFallback>
-      </Avatar>
+    <div
+      className={cn(
+        'flex min-w-0 flex-1 items-center gap-2.5 rounded-xl p-1.5 transition-all sm:gap-3 sm:p-2',
+        active && 'bg-primary/10 ring-2 ring-primary/40',
+        align === 'right' && 'flex-row-reverse text-right'
+      )}
+    >
+      <PlayerAvatar name={player.pseudo} src={player.avatarUrl} className="h-10 w-10 sm:h-12 sm:w-12" />
       <div className="min-w-0">
-        <p className="font-semibold truncate text-sm sm:text-base">{name} {isMe && <span className="text-xs text-orange-600">(vous)</span>}</p>
-        <p className="text-xs text-muted-foreground">Niv. {level} · {correct} ✓</p>
-        <p className="text-lg font-black text-orange-700">{score} pts</p>
+        <p className="truncate text-sm font-semibold sm:text-base">
+          {player.pseudo}
+          {isMe && <span className="ml-1 text-xs font-normal text-primary">(vous)</span>}
+        </p>
+        <p
+          className={cn(
+            'flex items-center gap-1.5 text-[11px] text-muted-foreground',
+            align === 'right' && 'justify-end'
+          )}
+        >
+          <span>{correct} ✓</span>
+          {streak >= 2 && (
+            <span className="flex items-center gap-0.5 text-orange-500">
+              <Flame className="h-3 w-3" />
+              {streak}
+            </span>
+          )}
+        </p>
+        <p className="text-lg font-black tabular-nums text-primary sm:text-xl">{score}</p>
       </div>
     </div>
   )
 }
 
-function PlayerScoreCard({ name, score, correct, avgTime, isWinner, isMe }: { name: string; score: number; correct: number; avgTime: number; isWinner: boolean; isMe?: boolean }) {
+function GameSummary({
+  summary, userId, onBack, onLeaderboard,
+}: {
+  summary: Summary
+  userId: string
+  onBack: () => void
+  onLeaderboard: () => void
+}) {
+  const won = summary.winnerId === userId
+  const draw = summary.winnerId === null
+  const you = summary.youAre
+
+  const mine = {
+    player: you === 'A' ? summary.playerA : summary.playerB,
+    score: you === 'A' ? summary.scoreA : summary.scoreB,
+    correct: you === 'A' ? summary.correctA : summary.correctB,
+    avgTime: you === 'A' ? summary.avgTimeA : summary.avgTimeB,
+    streak: you === 'A' ? summary.bestStreakA : summary.bestStreakB,
+  }
+  const theirs = {
+    player: you === 'A' ? summary.playerB : summary.playerA,
+    score: you === 'A' ? summary.scoreB : summary.scoreA,
+    correct: you === 'A' ? summary.correctB : summary.correctA,
+    avgTime: you === 'A' ? summary.avgTimeB : summary.avgTimeA,
+    streak: you === 'A' ? summary.bestStreakB : summary.bestStreakA,
+  }
+  const myQuestions = Math.round(summary.totalQuestions / 2)
+
   return (
-    <Card className={isWinner ? 'border-amber-400 bg-amber-50' : ''}>
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between mb-2">
-          <p className="font-bold text-lg">{name} {isMe && <span className="text-xs text-orange-600">(vous)</span>}</p>
-          {isWinner && <Trophy className="w-5 h-5 text-amber-500" />}
+    <div className="container mx-auto max-w-4xl px-3 sm:px-4">
+      {won && <Confetti />}
+
+      <Card className="overflow-hidden">
+        <div
+          className={cn(
+            'p-8 text-center text-white',
+            won
+              ? 'bg-gradient-to-br from-amber-400 to-orange-600'
+              : draw
+                ? 'bg-gradient-to-br from-slate-500 to-slate-700'
+                : 'bg-gradient-to-br from-rose-500 to-red-700'
+          )}
+        >
+          <div className="animate-pop">
+            {won ? (
+              <Trophy className="mx-auto mb-3 h-16 w-16" />
+            ) : draw ? (
+              <Medal className="mx-auto mb-3 h-16 w-16" />
+            ) : (
+              <Crown className="mx-auto mb-3 h-16 w-16 opacity-70" />
+            )}
+            <h2 className="text-3xl font-black sm:text-4xl">
+              {won ? 'Victoire !' : draw ? 'Match nul' : 'Défaite'}
+            </h2>
+            <p className="mt-1 text-lg opacity-90">
+              {summary.forfeit ? 'Partie abandonnée' : `${mine.score} — ${theirs.score}`}
+            </p>
+          </div>
         </div>
-        <div className="grid grid-cols-3 gap-2 text-center">
-          <div><p className="text-2xl font-black text-orange-700">{score}</p><p className="text-xs text-muted-foreground">Points</p></div>
-          <div><p className="text-2xl font-black text-green-600">{correct}</p><p className="text-xs text-muted-foreground">Correctes</p></div>
-          <div><p className="text-2xl font-black text-slate-700">{(avgTime / 1000).toFixed(1)}s</p><p className="text-xs text-muted-foreground">Temps moyen</p></div>
+
+        <CardContent className="p-4 sm:p-6">
+          <div className="mb-6 grid gap-3 sm:grid-cols-2">
+            <PlayerResult data={mine} isMe winner={won} questions={myQuestions} />
+            <PlayerResult data={theirs} winner={!won && !draw} questions={myQuestions} />
+          </div>
+
+          <h3 className="mb-3 font-bold">Détail des {summary.questions.length} questions</h3>
+          <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+            {summary.questions.map(q => {
+              const wasMine = q.answeredBy === you
+              const outcome = wasMine ? (you === 'A' ? q.correctA : q.correctB) : null
+              return (
+                <div
+                  key={q.index}
+                  className={cn(
+                    'rounded-xl border p-3',
+                    wasMine
+                      ? outcome
+                        ? 'border-emerald-500/30 bg-emerald-500/5'
+                        : 'border-destructive/30 bg-destructive/5'
+                      : 'bg-muted/40'
+                  )}
+                >
+                  <div className="mb-1 flex items-start justify-between gap-2">
+                    <p className="text-sm font-medium">
+                      <span className="text-muted-foreground">Q{q.index + 1}.</span> {q.text}
+                    </p>
+                    <Badge variant="outline" className="shrink-0 text-[10px]">
+                      {wasMine ? 'Vous' : theirs.player.pseudo}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Bonne réponse :{' '}
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      {q.propositions[q.correct]}
+                    </span>
+                  </p>
+                  {wasMine && !outcome && (
+                    <p className="mt-0.5 text-xs text-destructive">
+                      {q.chosen
+                        ? `Vous avez répondu : ${q.propositions[q.chosen]}`
+                        : 'Aucune réponse dans le temps imparti'}
+                    </p>
+                  )}
+                  {q.explanation && (
+                    <p className="mt-1.5 flex gap-1.5 text-xs italic text-muted-foreground">
+                      <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {q.explanation}
+                    </p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+            <Button onClick={onBack} className="flex-1 gap-2">
+              <Home className="h-4 w-4" /> Retour au salon
+            </Button>
+            <Button variant="outline" onClick={onLeaderboard} className="gap-2">
+              <Crown className="h-4 w-4" /> Voir le classement
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function PlayerResult({
+  data, isMe, winner, questions,
+}: {
+  data: { player: Player; score: number; correct: number; avgTime: number; streak: number }
+  isMe?: boolean
+  winner?: boolean
+  questions: number
+}) {
+  return (
+    <Card className={cn(winner && 'border-amber-400 bg-amber-500/5')}>
+      <CardContent className="p-4">
+        <div className="mb-3 flex items-center gap-2.5">
+          <PlayerAvatar name={data.player.pseudo} src={data.player.avatarUrl} className="h-10 w-10" />
+          <div className="min-w-0 flex-1">
+            <p className="truncate font-bold">
+              {data.player.pseudo}
+              {isMe && <span className="ml-1 text-xs font-normal text-primary">(vous)</span>}
+            </p>
+            <p className="text-xs text-muted-foreground">Niveau {data.player.level}</p>
+          </div>
+          {winner && <Trophy className="h-5 w-5 shrink-0 text-amber-500" />}
+        </div>
+        <div className="grid grid-cols-4 gap-1 text-center">
+          <Metric value={data.score} label="Points" />
+          <Metric value={`${data.correct}/${questions}`} label="Justes" />
+          <Metric
+            value={data.avgTime > 0 ? `${(data.avgTime / 1000).toFixed(1)}s` : '—'}
+            label="Temps"
+            icon={<Clock className="h-3 w-3" />}
+          />
+          <Metric value={data.streak} label="Série" icon={<Flame className="h-3 w-3" />} />
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+function Metric({
+  value, label, icon,
+}: {
+  value: React.ReactNode
+  label: string
+  icon?: React.ReactNode
+}) {
+  return (
+    <div>
+      <p className="text-lg font-black tabular-nums">{value}</p>
+      <p className="flex items-center justify-center gap-0.5 text-[10px] text-muted-foreground">
+        {icon}
+        {label}
+      </p>
+    </div>
   )
 }

@@ -1,79 +1,138 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { z } from 'zod'
 import { db } from '@/lib/db'
-import { getUserFromRequest } from '@/lib/auth'
+import { guarded, requireAdmin, parseBody, ok, fail } from '@/lib/api'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
 
-function requireAdmin(req: NextRequest) {
-  const auth = getUserFromRequest(req)
-  if (!auth) return { error: NextResponse.json({ error: 'Non authentifié' }, { status: 401 }) }
-  if (auth.role !== 'ADMIN') return { error: NextResponse.json({ error: 'Accès refusé' }, { status: 403 }) }
-  return { auth }
+const baseQuestion = {
+  text: z.string().trim().min(8, '8 caractères minimum').max(500),
+  propositionA: z.string().trim().min(1).max(200),
+  propositionB: z.string().trim().min(1).max(200),
+  propositionC: z.string().trim().min(1).max(200),
+  propositionD: z.string().trim().min(1).max(200),
+  correctAnswer: z.enum(['A', 'B', 'C', 'D']),
+  explanation: z.string().trim().max(500).nullable().optional(),
+  difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).default('MEDIUM'),
+  categoryId: z.string().min(1),
 }
 
-// GET /api/admin/questions
-export async function GET(req: NextRequest) {
-  const guard = requireAdmin(req)
-  if ('error' in guard) return guard.error
+const createSchema = z.object(baseQuestion).refine(
+  q =>
+    new Set(
+      [q.propositionA, q.propositionB, q.propositionC, q.propositionD].map(p =>
+        p.toLowerCase()
+      )
+    ).size === 4,
+  { message: 'Les quatre propositions doivent être distinctes' }
+)
+
+const updateSchema = z
+  .object({
+    text: baseQuestion.text.optional(),
+    propositionA: baseQuestion.propositionA.optional(),
+    propositionB: baseQuestion.propositionB.optional(),
+    propositionC: baseQuestion.propositionC.optional(),
+    propositionD: baseQuestion.propositionD.optional(),
+    correctAnswer: baseQuestion.correctAnswer.optional(),
+    explanation: baseQuestion.explanation,
+    difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).optional(),
+    categoryId: z.string().min(1).optional(),
+  })
+
+// GET /api/admin/questions?categoryId=…&difficulty=…&q=…&limit=…
+export const GET = guarded(async (req: NextRequest) => {
+  requireAdmin(req)
   const url = new URL(req.url)
   const categoryId = url.searchParams.get('categoryId') || undefined
-  const q = url.searchParams.get('q') || ''
-  const questions = await db.question.findMany({
-    where: {
-      AND: [
-        categoryId ? { categoryId } : {},
-        q ? { text: { contains: q } } : {},
-      ],
-    },
-    include: { category: true },
-    orderBy: { createdAt: 'desc' },
-    take: 200,
-  })
-  return NextResponse.json({ questions })
-}
+  const difficulty = url.searchParams.get('difficulty')?.toUpperCase() || undefined
+  const search = url.searchParams.get('q')?.trim() || ''
+  const requested = parseInt(url.searchParams.get('limit') || '100', 10)
+  const take = Math.min(Math.max(Number.isFinite(requested) ? requested : 100, 1), 500)
 
-// POST /api/admin/questions (create)
-export async function POST(req: NextRequest) {
-  const guard = requireAdmin(req)
-  if ('error' in guard) return guard.error
-  const body = await req.json()
-  const { text, propositionA, propositionB, propositionC, propositionD, correctAnswer, explanation, difficulty, categoryId } = body
-  if (!text || !propositionA || !propositionB || !propositionC || !propositionD || !correctAnswer || !categoryId) {
-    return NextResponse.json({ error: 'Champs manquants' }, { status: 400 })
+  const where = {
+    ...(categoryId ? { categoryId } : {}),
+    ...(difficulty && ['EASY', 'MEDIUM', 'HARD'].includes(difficulty) ? { difficulty } : {}),
+    ...(search ? { text: { contains: search } } : {}),
   }
-  const q = await db.question.create({
-    data: {
-      text, propositionA, propositionB, propositionC, propositionD,
-      correctAnswer, explanation: explanation || null,
-      difficulty: difficulty || 'MEDIUM', categoryId,
-    },
+
+  const [questions, total] = await Promise.all([
+    db.question.findMany({
+      where,
+      include: { category: { select: { id: true, name: true, color: true } } },
+      orderBy: { createdAt: 'desc' },
+      take,
+    }),
+    db.question.count({ where }),
+  ])
+
+  return ok({ questions, total, returned: questions.length })
+})
+
+// POST /api/admin/questions
+export const POST = guarded(async (req: NextRequest) => {
+  requireAdmin(req)
+  const body = await parseBody(req, createSchema)
+
+  const category = await db.category.findUnique({ where: { id: body.categoryId } })
+  if (!category) return fail('Catégorie introuvable', 400)
+
+  const duplicate = await db.question.findUnique({ where: { text: body.text } })
+  if (duplicate) return fail('Une question avec cet énoncé existe déjà', 409)
+
+  const question = await db.question.create({
+    data: { ...body, explanation: body.explanation || null },
+    include: { category: { select: { id: true, name: true, color: true } } },
   })
-  return NextResponse.json({ question: q })
-}
+  return ok({ question }, { status: 201 })
+})
 
-// PATCH /api/admin/questions?id=...
-export async function PATCH(req: NextRequest) {
-  const guard = requireAdmin(req)
-  if ('error' in guard) return guard.error
-  const url = new URL(req.url)
-  const id = url.searchParams.get('id')
-  if (!id) return NextResponse.json({ error: 'ID requis' }, { status: 400 })
-  const body = await req.json()
-  const allowed: any = {}
-  for (const k of ['text', 'propositionA', 'propositionB', 'propositionC', 'propositionD', 'correctAnswer', 'explanation', 'difficulty', 'categoryId']) {
-    if (body[k] !== undefined) allowed[k] = body[k]
+// PATCH /api/admin/questions?id=…
+export const PATCH = guarded(async (req: NextRequest) => {
+  requireAdmin(req)
+  const id = new URL(req.url).searchParams.get('id')
+  if (!id) return fail('Paramètre « id » requis', 400)
+
+  const body = await parseBody(req, updateSchema)
+  if (!Object.keys(body).length) return fail('Aucune modification fournie', 400)
+
+  const existing = await db.question.findUnique({ where: { id } })
+  if (!existing) return fail('Question introuvable', 404)
+
+  if (body.categoryId) {
+    const category = await db.category.findUnique({ where: { id: body.categoryId } })
+    if (!category) return fail('Catégorie introuvable', 400)
   }
-  const q = await db.question.update({ where: { id }, data: allowed })
-  return NextResponse.json({ question: q })
-}
+  if (body.text && body.text !== existing.text) {
+    const duplicate = await db.question.findUnique({ where: { text: body.text } })
+    if (duplicate) return fail('Une question avec cet énoncé existe déjà', 409)
+  }
 
-// DELETE /api/admin/questions?id=...
-export async function DELETE(req: NextRequest) {
-  const guard = requireAdmin(req)
-  if ('error' in guard) return guard.error
-  const url = new URL(req.url)
-  const id = url.searchParams.get('id')
-  if (!id) return NextResponse.json({ error: 'ID requis' }, { status: 400 })
+  // Les propositions résultantes doivent rester distinctes après fusion.
+  const merged = { ...existing, ...body }
+  const props = [merged.propositionA, merged.propositionB, merged.propositionC, merged.propositionD]
+  if (new Set(props.map(p => p.toLowerCase())).size !== 4) {
+    return fail('Les quatre propositions doivent être distinctes', 400)
+  }
+
+  const question = await db.question.update({
+    where: { id },
+    data: body,
+    include: { category: { select: { id: true, name: true, color: true } } },
+  })
+  return ok({ question })
+})
+
+// DELETE /api/admin/questions?id=…
+export const DELETE = guarded(async (req: NextRequest) => {
+  requireAdmin(req)
+  const id = new URL(req.url).searchParams.get('id')
+  if (!id) return fail('Paramètre « id » requis', 400)
+
+  const existing = await db.question.findUnique({ where: { id } })
+  if (!existing) return fail('Question introuvable', 404)
+
   await db.question.delete({ where: { id } })
-  return NextResponse.json({ ok: true })
-}
+  return ok({ ok: true, deleted: id })
+})

@@ -1,16 +1,36 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getUserFromRequest } from '@/lib/auth'
-import { realtime } from '@/lib/realtime'
+import { NextRequest } from 'next/server'
+import { z } from 'zod'
+import { realtime, GAME_CONFIG } from '@/lib/realtime'
+import { pickQuestions } from '@/lib/question-picker'
+import { guarded, requireAuth, parseBody, ok, fail } from '@/lib/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// POST /api/realtime/game-start
-export async function POST(req: NextRequest) {
-  const auth = getUserFromRequest(req)
-  if (!auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
-  const body = await req.json()
-  const result = realtime.startGame(auth.userId, body.opponentId, body.categoryFilter || null, body.questions)
-  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 400 })
-  return NextResponse.json({ ok: true, gameId: result.gameId })
-}
+const schema = z.object({
+  opponentId: z.string().min(1),
+  categoryFilter: z.string().nullable().optional(),
+})
+
+// POST /api/realtime/game-start — lancement de la partie par l'invitant.
+//
+// Les questions sont tirées ici, côté serveur. Auparavant le client les
+// envoyait dans le corps de la requête : il connaissait donc les bonnes
+// réponses avant le début du match et pouvait fournir n'importe quel contenu.
+export const POST = guarded(async (req: NextRequest) => {
+  const auth = requireAuth(req)
+  const { opponentId, categoryFilter } = await parseBody(req, schema)
+
+  const questions = await pickQuestions(categoryFilter ?? null, GAME_CONFIG.questionsPerGame)
+  if (questions.length < 4) {
+    return fail(
+      `Pas assez de questions disponibles (${questions.length}) pour lancer une partie`,
+      400
+    )
+  }
+
+  const result = realtime.startGame(auth.userId, opponentId, categoryFilter ?? null, questions)
+  if (!result.ok) return fail(result.error || 'Impossible de lancer la partie', 409)
+
+  return ok({ ok: true, gameId: result.gameId, totalQuestions: questions.length })
+})

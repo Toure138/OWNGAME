@@ -23,13 +23,17 @@ export interface User {
   country: string
   avatarUrl?: string | null
   role: 'USER' | 'ADMIN'
+  banned?: boolean
   level: number
   xp: number
   gamesPlayed: number
   wins: number
   losses: number
+  draws?: number
   totalScore: number
+  bestStreak?: number
   rank?: number
+  nationalRank?: number
   createdAt?: string
 }
 
@@ -39,7 +43,7 @@ export interface OnlinePlayer {
   avatarUrl: string | null
   country: string
   level: number
-  status: 'ONLINE' | 'IN_GAME' | 'AVAILABLE'
+  status: 'AVAILABLE' | 'IN_GAME'
 }
 
 export interface NotificationItem {
@@ -56,13 +60,21 @@ export interface InvitationItem {
   fromUserId: string
   fromPseudo: string
   fromAvatarUrl: string | null
+  fromLevel?: number
   toUserId: string
   categoryFilter: string | null
   createdAt: number
 }
 
+export interface PendingInvite {
+  invitationId: string
+  toUserId: string
+  toPseudo: string
+  sentAt: number
+}
+
 interface AppState {
-  // Auth
+  // Authentification
   token: string | null
   user: User | null
   setAuth: (token: string, user: User) => void
@@ -73,7 +85,7 @@ interface AppState {
   view: View
   setView: (v: View) => void
 
-  // Real-time
+  // Temps réel
   onlinePlayers: OnlinePlayer[]
   setOnlinePlayers: (list: OnlinePlayer[]) => void
   connected: boolean
@@ -81,18 +93,33 @@ interface AppState {
 
   // Notifications
   notifications: NotificationItem[]
-  setNotifications: (n: NotificationItem[]) => void
+  unreadCount: number
+  setNotifications: (n: NotificationItem[], unread?: number) => void
   addNotification: (n: NotificationItem) => void
-  unreadCount: () => number
+  markAllRead: () => void
+  markRead: (id: string) => void
 
   // Invitations
   invitations: InvitationItem[]
   addInvitation: (i: InvitationItem) => void
   removeInvitation: (id: string) => void
+  pendingInvite: PendingInvite | null
+  setPendingInvite: (p: PendingInvite | null) => void
 
-  // Game category filter (for matchmaking)
+  // Préférences de partie
   categoryFilter: string | null
   setCategoryFilter: (c: string | null) => void
+  soundEnabled: boolean
+  toggleSound: () => void
+}
+
+const initialTransient = {
+  onlinePlayers: [] as OnlinePlayer[],
+  notifications: [] as NotificationItem[],
+  unreadCount: 0,
+  invitations: [] as InvitationItem[],
+  pendingInvite: null as PendingInvite | null,
+  connected: false,
 }
 
 export const useApp = create<AppState>()(
@@ -101,35 +128,74 @@ export const useApp = create<AppState>()(
       token: null,
       user: null,
       setAuth: (token, user) => set({ token, user, view: 'lobby' }),
-      logout: () => set({ token: null, user: null, view: 'auth', onlinePlayers: [], notifications: [], invitations: [] }),
-      updateUser: (patch) => set({ user: { ...(get().user as User), ...patch } }),
+      logout: () => set({ token: null, user: null, view: 'auth', ...initialTransient }),
+      updateUser: patch => {
+        const current = get().user
+        if (!current) return
+        set({ user: { ...current, ...patch } })
+      },
 
       view: 'auth',
-      setView: (v) => set({ view: v }),
+      setView: v => set({ view: v }),
 
       onlinePlayers: [],
-      setOnlinePlayers: (list) => set({ onlinePlayers: list }),
+      setOnlinePlayers: list => set({ onlinePlayers: list }),
       connected: false,
-      setConnected: (b) => set({ connected: b }),
+      setConnected: b => set({ connected: b }),
 
       notifications: [],
-      setNotifications: (n) => set({ notifications: n }),
-      addNotification: (n) => set({ notifications: [n, ...get().notifications].slice(0, 50) }),
-      unreadCount: () => get().notifications.filter(n => !n.read).length,
+      unreadCount: 0,
+      setNotifications: (n, unread) =>
+        set({ notifications: n, unreadCount: unread ?? n.filter(x => !x.read).length }),
+      addNotification: n =>
+        set(state => ({
+          notifications: [n, ...state.notifications].slice(0, 60),
+          unreadCount: state.unreadCount + (n.read ? 0 : 1),
+        })),
+      markAllRead: () =>
+        set(state => ({
+          notifications: state.notifications.map(n => ({ ...n, read: true })),
+          unreadCount: 0,
+        })),
+      markRead: id =>
+        set(state => {
+          const target = state.notifications.find(n => n.id === id)
+          if (!target || target.read) return state
+          return {
+            notifications: state.notifications.map(n => (n.id === id ? { ...n, read: true } : n)),
+            unreadCount: Math.max(0, state.unreadCount - 1),
+          }
+        }),
 
       invitations: [],
-      addInvitation: (i) => {
-        const list = get().invitations
-        if (!list.find(x => x.id === i.id)) set({ invitations: [i, ...list] })
-      },
-      removeInvitation: (id) => set({ invitations: get().invitations.filter(i => i.id !== id) }),
+      addInvitation: i =>
+        set(state =>
+          state.invitations.some(x => x.id === i.id)
+            ? state
+            : { invitations: [i, ...state.invitations] }
+        ),
+      removeInvitation: id =>
+        set(state => ({ invitations: state.invitations.filter(i => i.id !== id) })),
+      pendingInvite: null,
+      setPendingInvite: p => set({ pendingInvite: p }),
 
       categoryFilter: null,
-      setCategoryFilter: (c) => set({ categoryFilter: c }),
+      setCategoryFilter: c => set({ categoryFilter: c }),
+      soundEnabled: true,
+      toggleSound: () => set(state => ({ soundEnabled: !state.soundEnabled })),
     }),
     {
       name: 'qvgdm-store',
-      partialize: (s) => ({ token: s.token, user: s.user, view: s.view, categoryFilter: s.categoryFilter }),
+      version: 2,
+      // Seuls l'identité et les préférences sont conservées : l'état temps réel
+      // (présence, invitations) doit toujours repartir du serveur.
+      partialize: s => ({
+        token: s.token,
+        user: s.user,
+        view: s.view === 'game' ? 'lobby' : s.view,
+        categoryFilter: s.categoryFilter,
+        soundEnabled: s.soundEnabled,
+      }),
     }
   )
 )

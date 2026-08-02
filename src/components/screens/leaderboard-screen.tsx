@@ -1,120 +1,236 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useApp } from '@/lib/store'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Crown, Medal, Award } from 'lucide-react'
+import { PlayerAvatar } from '@/components/ui/player-avatar'
+import { EmptyState, ErrorState, ListSkeleton } from '@/components/ui/states'
+import { Crown, Medal, Award, TrendingUp, Globe2, RefreshCw } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
-const SCOPES: Array<{ id: string; label: string }> = [
+const SCOPES = [
   { id: 'global', label: 'Mondial' },
   { id: 'national', label: 'National' },
   { id: 'weekly', label: 'Hebdo' },
   { id: 'monthly', label: 'Mensuel' },
   { id: 'yearly', label: 'Annuel' },
-]
+] as const
+
+interface Entry {
+  id: string
+  pseudo: string
+  avatarUrl: string | null
+  country: string
+  level: number
+  totalScore: number
+  wins: number
+  losses: number
+  gamesPlayed: number
+  winRate: number
+}
 
 export function LeaderboardScreen() {
   const token = useApp(s => s.token)!
   const user = useApp(s => s.user)!
-  const [scope, setScope] = useState('global')
-  const [players, setPlayers] = useState<any[]>([])
+  const [scope, setScope] = useState<string>('global')
+  const [players, setPlayers] = useState<Entry[]>([])
   const [myRank, setMyRank] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const res = await fetch(`/api/leaderboard?scope=${scope}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Chargement impossible')
+      setPlayers(data.players || [])
+      setMyRank(data.myRank ?? null)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Erreur inconnue')
+    } finally {
+      setLoading(false)
+    }
+  }, [scope, token])
 
   useEffect(() => {
-    let cancelled = false
-    async function load() {
-      setLoading(true)
-      try {
-        const r = await fetch(`/api/leaderboard?scope=${scope}`, { headers: { Authorization: `Bearer ${token}` } })
-        const d = await r.json()
-        if (!cancelled) {
-          setPlayers(d.players || [])
-          setMyRank(d.myRank)
-        }
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
-    return () => { cancelled = true }
-  }, [token, scope])
+    void load()
+  }, [load])
+
+  const podium = players.slice(0, 3)
+  const rest = players.slice(3)
+  const periodScope = ['weekly', 'monthly', 'yearly'].includes(scope)
 
   return (
-    <div className="container mx-auto p-4 max-w-4xl">
-      <div className="mb-4">
-        <h1 className="text-3xl font-black text-orange-900">Classement</h1>
-        <p className="text-muted-foreground">Les meilleurs joueurs de la communauté</p>
+    <div className="container mx-auto max-w-4xl px-3 sm:px-4">
+      <div className="animate-in-up mb-4 flex items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+            <span className="text-gradient">Classement</span>
+          </h1>
+          <p className="text-sm text-muted-foreground">Les meilleurs joueurs de la plateforme.</p>
+        </div>
+        <Button variant="ghost" size="icon" onClick={load} aria-label="Actualiser">
+          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
+        </Button>
       </div>
 
       <Tabs value={scope} onValueChange={setScope} className="mb-4">
-        <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5">
-          {SCOPES.map(s => <TabsTrigger key={s.id} value={s.id}>{s.label}</TabsTrigger>)}
+        <TabsList className="grid w-full grid-cols-3 sm:grid-cols-5">
+          {SCOPES.map(s => (
+            <TabsTrigger key={s.id} value={s.id} className="text-xs sm:text-sm">
+              {s.label}
+            </TabsTrigger>
+          ))}
         </TabsList>
       </Tabs>
 
-      {myRank && (
-        <Card className="mb-4 border-amber-400 bg-gradient-to-r from-amber-50 to-orange-50">
-          <CardContent className="p-3 flex items-center justify-between">
+      {myRank !== null && (
+        <Card className="ring-gradient mb-4">
+          <CardContent className="flex items-center justify-between gap-3 p-3.5">
             <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-amber-500 text-white font-bold flex items-center justify-center">#{myRank}</div>
-              <div>
+              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary font-bold text-primary-foreground">
+                #{myRank}
+              </div>
+              <div className="min-w-0">
                 <p className="font-semibold">Votre position</p>
-                <p className="text-xs text-muted-foreground">{user.pseudo} · {user.totalScore} pts</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {user.pseudo} · {user.totalScore.toLocaleString('fr-FR')} pts
+                </p>
               </div>
             </div>
-            <Badge className="bg-amber-500">Niv. {user.level}</Badge>
+            <Badge variant="secondary">Niveau {user.level}</Badge>
           </CardContent>
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-orange-900">Top 100</CardTitle>
-          <CardDescription>{SCOPES.find(s => s.id === scope)?.label}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <p className="text-center py-8 text-muted-foreground">Chargement...</p>
-          ) : players.length === 0 ? (
-            <p className="text-center py-8 text-muted-foreground">Aucun joueur dans ce classement pour le moment.</p>
-          ) : (
-            <div className="space-y-1">
-              {players.map((p, i) => {
+      {loading ? (
+        <ListSkeleton rows={8} />
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
+      ) : players.length === 0 ? (
+        <EmptyState
+          icon={<Globe2 className="h-7 w-7" />}
+          title="Classement vide"
+          description={
+            periodScope
+              ? 'Aucune partie terminée sur cette période. Lancez un duel pour y figurer.'
+              : 'Aucun joueur classé pour le moment.'
+          }
+        />
+      ) : (
+        <>
+          {/* Podium — affiché seulement quand il y a au moins trois joueurs */}
+          {podium.length === 3 && (
+            <div className="mb-5 grid grid-cols-3 items-end gap-2 sm:gap-3">
+              <PodiumStep entry={podium[1]} rank={2} isMe={podium[1].id === user.id} />
+              <PodiumStep entry={podium[0]} rank={1} isMe={podium[0].id === user.id} />
+              <PodiumStep entry={podium[2]} rank={3} isMe={podium[2].id === user.id} />
+            </div>
+          )}
+
+          <Card>
+            <CardContent className="space-y-1 p-2 sm:p-3">
+              {(podium.length === 3 ? rest : players).map((p, i) => {
+                const rank = (podium.length === 3 ? 4 : 1) + i
                 const isMe = p.id === user.id
-                const rank = i + 1
                 return (
                   <div
                     key={p.id}
-                    className={`flex items-center gap-3 p-2.5 rounded-lg ${isMe ? 'bg-amber-100 ring-1 ring-amber-400' : i < 3 ? 'bg-orange-50' : 'hover:bg-slate-50'}`}
+                    className={cn(
+                      'flex items-center gap-3 rounded-xl p-2.5 transition-colors',
+                      isMe ? 'bg-primary/10 ring-1 ring-primary/40' : 'hover:bg-accent/40'
+                    )}
                   >
-                    <div className="w-8 text-center font-bold">
-                      {rank === 1 ? <Crown className="w-5 h-5 mx-auto text-amber-500" /> :
-                       rank === 2 ? <Medal className="w-5 h-5 mx-auto text-slate-400" /> :
-                       rank === 3 ? <Award className="w-5 h-5 mx-auto text-amber-700" /> :
-                       <span className="text-sm text-muted-foreground">{rank}</span>}
+                    <span className="w-8 shrink-0 text-center text-sm font-bold tabular-nums text-muted-foreground">
+                      {rank}
+                    </span>
+                    <PlayerAvatar name={p.pseudo} src={p.avatarUrl} className="h-9 w-9 text-xs" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-semibold">
+                        {p.pseudo}
+                        {isMe && <span className="ml-1 text-xs font-normal text-primary">(vous)</span>}
+                      </p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {p.country} · Niv. {p.level} · {p.winRate}% de victoires
+                      </p>
                     </div>
-                    <Avatar className="w-9 h-9">
-                      <AvatarFallback className="bg-orange-200 text-orange-800 text-sm font-bold">{p.pseudo.slice(0, 2).toUpperCase()}</AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold truncate">{p.pseudo} {isMe && <span className="text-xs text-orange-600">(vous)</span>}</p>
-                      <p className="text-xs text-muted-foreground">{p.country} · Niv. {p.level} · {p.winRate}% victoires</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-black text-orange-700">{p.totalScore}</p>
-                      <p className="text-xs text-muted-foreground">{p.wins}V · {p.gamesPlayed - p.wins}D</p>
+                    <div className="shrink-0 text-right">
+                      <p className="font-bold tabular-nums text-primary">
+                        {p.totalScore.toLocaleString('fr-FR')}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {p.wins}V · {p.losses}D
+                      </p>
                     </div>
                   </div>
                 )
               })}
-            </div>
+            </CardContent>
+          </Card>
+
+          {periodScope && (
+            <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
+              <TrendingUp className="h-3.5 w-3.5" />
+              Scores cumulés sur les parties terminées de la période.
+            </p>
           )}
-        </CardContent>
-      </Card>
+        </>
+      )}
+    </div>
+  )
+}
+
+function PodiumStep({ entry, rank, isMe }: { entry: Entry; rank: number; isMe?: boolean }) {
+  const styles: Record<number, { height: string; icon: React.ReactNode; ring: string }> = {
+    1: {
+      height: 'h-28',
+      icon: <Crown className="h-5 w-5 text-amber-500" />,
+      ring: 'ring-2 ring-amber-400',
+    },
+    2: {
+      height: 'h-24',
+      icon: <Medal className="h-5 w-5 text-slate-400" />,
+      ring: 'ring-2 ring-slate-300',
+    },
+    3: {
+      height: 'h-20',
+      icon: <Award className="h-5 w-5 text-amber-700" />,
+      ring: 'ring-2 ring-amber-700/50',
+    },
+  }
+  const style = styles[rank]
+
+  return (
+    <div className="flex flex-col items-center">
+      <div className="mb-1.5">{style.icon}</div>
+      <PlayerAvatar
+        name={entry.pseudo}
+        src={entry.avatarUrl}
+        className={cn(rank === 1 ? 'h-14 w-14' : 'h-12 w-12', style.ring)}
+      />
+      <p className="mt-1.5 w-full truncate px-1 text-center text-xs font-semibold sm:text-sm">
+        {entry.pseudo}
+        {isMe && <span className="text-primary"> (vous)</span>}
+      </p>
+      <p className="text-xs font-bold tabular-nums text-primary">
+        {entry.totalScore.toLocaleString('fr-FR')}
+      </p>
+      <div
+        className={cn(
+          'mt-1.5 flex w-full items-start justify-center rounded-t-xl pt-2 text-lg font-black text-muted-foreground',
+          style.height,
+          rank === 1 ? 'bg-amber-500/15' : rank === 2 ? 'bg-slate-400/15' : 'bg-amber-700/15'
+        )}
+      >
+        {rank}
+      </div>
     </div>
   )
 }

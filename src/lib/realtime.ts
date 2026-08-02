@@ -1,8 +1,31 @@
-// In-memory realtime state for the quiz game.
-// This replaces the WebSocket service with HTTP long-polling.
-// State is lost on server restart, which is acceptable for a demo.
+// Moteur temps réel du jeu, en mémoire.
+//
+// Les échanges se font par interrogation HTTP (`/api/realtime/poll`) plutôt que
+// par WebSocket : l'application tourne en une seule instance, ce qui suffit et
+// évite toute infrastructure supplémentaire. L'état est perdu au redémarrage du
+// serveur — acceptable, les parties en cours sont alors clôturées côté client.
+//
+// La persistance des parties terminées est déléguée à `game-persistence.ts` et
+// déclenchée une seule fois, ici, par le serveur.
+
+import { persistFinishedGame, type PersistQuestion } from './game-persistence'
+
+export const GAME_CONFIG = {
+  questionsPerGame: 20,
+  timerSeconds: 20,
+  /** Délai d'affichage du résultat avant la question suivante. */
+  resultDelayMs: 2600,
+  /** Une invitation sans réponse expire au bout de ce délai. */
+  invitationTtlMs: 60_000,
+  /** Un joueur qui n'interroge plus le serveur est considéré déconnecté. */
+  staleAfterMs: 30_000,
+  /** Points de base d'une bonne réponse, avant bonus de rapidité. */
+  basePoints: 100,
+  maxSpeedBonus: 50,
+}
 
 type Status = 'AVAILABLE' | 'IN_GAME'
+type Choice = 'A' | 'B' | 'C' | 'D'
 
 interface OnlinePlayer {
   userId: string
@@ -12,6 +35,7 @@ interface OnlinePlayer {
   level: number
   status: Status
   lastPoll: number
+  joinedAt: number
 }
 
 interface ChatMessage {
@@ -28,6 +52,7 @@ interface Invitation {
   fromUserId: string
   fromPseudo: string
   fromAvatarUrl: string | null
+  fromLevel: number
   toUserId: string
   categoryFilter: string | null
   createdAt: number
@@ -37,16 +62,19 @@ interface GameQuestion {
   index: number
   questionId: string
   text: string
-  propositions: { A: string; B: string; C: string; D: string }
-  correct: 'A' | 'B' | 'C' | 'D'
-  explanation?: string
+  propositions: Record<Choice, string>
+  correct: Choice
+  explanation?: string | null
   categoryId: string
+  categoryName?: string | null
+  difficulty?: string | null
   answeredBy: 'A' | 'B'
   answered: boolean
-  chosen?: 'A' | 'B' | 'C' | 'D' | null
-  correctA?: boolean | null
-  correctB?: boolean | null
+  chosen: Choice | null
+  correctA: boolean | null
+  correctB: boolean | null
   responseTime?: number
+  pointsAwarded?: number
 }
 
 interface GameSession {
@@ -60,6 +88,10 @@ interface GameSession {
   scoreB: number
   correctA: number
   correctB: number
+  streakA: number
+  streakB: number
+  bestStreakA: number
+  bestStreakB: number
   timesA: number[]
   timesB: number[]
   status: 'IN_PROGRESS' | 'FINISHED'
@@ -68,43 +100,57 @@ interface GameSession {
   chat: ChatMessage[]
   createdAt: number
   finishedAt: number | null
-  events: Array<{ id: string; type: string; data: any; createdAt: number; targetUserId?: string }>
+  persisted: boolean
+  advanceTimer: ReturnType<typeof setTimeout> | null
 }
 
-// Global state (persists across API calls within the same server process)
+interface UserEvent {
+  id: string
+  type: string
+  data: unknown
+  createdAt: number
+}
+
+interface QuizState {
+  onlinePlayers: Map<string, OnlinePlayer>
+  invitations: Map<string, Invitation>
+  games: Map<string, GameSession>
+  userToGame: Map<string, string>
+  userEvents: Map<string, UserEvent[]>
+}
+
 declare global {
-  var __quizState: {
-    onlinePlayers: Map<string, OnlinePlayer>
-    invitations: Map<string, Invitation>
-    games: Map<string, GameSession>
-    userToGame: Map<string, string>
-    userEvents: Map<string, Array<{ id: string; type: string; data: any; createdAt: number }>>
-  } | undefined
+  var __quizState: QuizState | undefined
+  var __quizTimers: boolean | undefined
 }
 
-const state = globalThis.__quizState ?? {
-  onlinePlayers: new Map<string, OnlinePlayer>(),
-  invitations: new Map<string, Invitation>(),
-  games: new Map<string, GameSession>(),
-  userToGame: new Map<string, string>(),
-  userEvents: new Map<string, Array<{ id: string; type: string; data: any; createdAt: number }>>(),
-}
-globalThis.__quizState = state
+const state: QuizState = (globalThis.__quizState ??= {
+  onlinePlayers: new Map(),
+  invitations: new Map(),
+  games: new Map(),
+  userToGame: new Map(),
+  userEvents: new Map(),
+})
+
+// ---------------------------------------------------------------------------
+// Utilitaires
+// ---------------------------------------------------------------------------
 
 function uid(prefix: string) {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`
 }
 
-function pushEvent(userId: string, type: string, data: any) {
+function pushEvent(userId: string, type: string, data: unknown) {
   const events = state.userEvents.get(userId) || []
   events.push({ id: uid('evt'), type, data, createdAt: Date.now() })
-  // Keep last 50 events per user
-  if (events.length > 50) events.shift()
+  // On conserve les 80 derniers événements : au-delà, le client a de toute
+  // façon perdu le fil et se resynchronisera.
+  while (events.length > 80) events.shift()
   state.userEvents.set(userId, events)
 }
 
-function broadcastPresence() {
-  const list = Array.from(state.onlinePlayers.values()).map(p => ({
+function presenceList() {
+  return Array.from(state.onlinePlayers.values()).map(p => ({
     userId: p.userId,
     pseudo: p.pseudo,
     avatarUrl: p.avatarUrl,
@@ -112,6 +158,10 @@ function broadcastPresence() {
     level: p.level,
     status: p.status,
   }))
+}
+
+function broadcastPresence() {
+  const list = presenceList()
   for (const userId of state.onlinePlayers.keys()) {
     pushEvent(userId, 'presence:update', list)
   }
@@ -125,17 +175,28 @@ function setStatus(userId: string, status: Status) {
   }
 }
 
-function pointsFor(responseTimeMs: number) {
-  const seconds = responseTimeMs / 1000
-  const speedBonus = Math.max(0, Math.round(50 - (seconds * 2.5)))
-  return 100 + speedBonus
+/** 100 points de base, plus un bonus décroissant avec le temps de réponse. */
+function pointsFor(responseTimeMs: number, timerSeconds: number) {
+  const seconds = Math.max(0, responseTimeMs / 1000)
+  const ratio = Math.max(0, 1 - seconds / timerSeconds)
+  return GAME_CONFIG.basePoints + Math.round(GAME_CONFIG.maxSpeedBonus * ratio)
+}
+
+function publicPlayer(p: OnlinePlayer) {
+  return {
+    userId: p.userId,
+    pseudo: p.pseudo,
+    avatarUrl: p.avatarUrl,
+    country: p.country,
+    level: p.level,
+  }
 }
 
 function publicGame(game: GameSession) {
   return {
     id: game.id,
-    playerA: { userId: game.playerA.userId, pseudo: game.playerA.pseudo, avatarUrl: game.playerA.avatarUrl, country: game.playerA.country, level: game.playerA.level },
-    playerB: { userId: game.playerB.userId, pseudo: game.playerB.pseudo, avatarUrl: game.playerB.avatarUrl, country: game.playerB.country, level: game.playerB.level },
+    playerA: publicPlayer(game.playerA),
+    playerB: publicPlayer(game.playerB),
     categoryFilter: game.categoryFilter,
     currentTurn: game.currentTurn,
     totalQuestions: game.questions.length,
@@ -143,10 +204,16 @@ function publicGame(game: GameSession) {
     scoreB: game.scoreB,
     correctA: game.correctA,
     correctB: game.correctB,
+    streakA: game.streakA,
+    streakB: game.streakB,
     status: game.status,
     timerSeconds: game.timerSeconds,
   }
 }
+
+// ---------------------------------------------------------------------------
+// Déroulement d'une partie
+// ---------------------------------------------------------------------------
 
 function sendQuestion(game: GameSession) {
   const q = game.questions[game.currentTurn]
@@ -158,16 +225,29 @@ function sendQuestion(game: GameSession) {
   const payload = {
     gameId: game.id,
     index: q.index,
+    total: game.questions.length,
     text: q.text,
     propositions: q.propositions,
     categoryId: q.categoryId,
+    categoryName: q.categoryName,
+    difficulty: q.difficulty,
     answeredBy: q.answeredBy,
     timerSeconds: game.timerSeconds,
     scoreA: game.scoreA,
     scoreB: game.scoreB,
+    startedAt: game.questionStartedAt,
   }
   pushEvent(game.playerA.userId, 'game:question', payload)
   pushEvent(game.playerB.userId, 'game:question', payload)
+}
+
+function scheduleAdvance(game: GameSession) {
+  if (game.advanceTimer) clearTimeout(game.advanceTimer)
+  game.advanceTimer = setTimeout(() => {
+    game.advanceTimer = null
+    advanceGame(game)
+  }, GAME_CONFIG.resultDelayMs)
+  game.advanceTimer.unref?.()
 }
 
 function advanceGame(game: GameSession) {
@@ -184,6 +264,10 @@ function finishGame(game: GameSession, forcedWinnerId: string | null, forfeit: b
   if (game.status === 'FINISHED') return
   game.status = 'FINISHED'
   game.finishedAt = Date.now()
+  if (game.advanceTimer) {
+    clearTimeout(game.advanceTimer)
+    game.advanceTimer = null
+  }
 
   let winnerId = forcedWinnerId
   if (!winnerId) {
@@ -192,10 +276,26 @@ function finishGame(game: GameSession, forcedWinnerId: string | null, forfeit: b
     else winnerId = null
   }
 
-  const avg = (arr: number[]) => arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0
+  const avg = (arr: number[]) =>
+    arr.length ? Math.round(arr.reduce((a, b) => a + b, 0) / arr.length) : 0
+
+  const questions: PersistQuestion[] = game.questions.map(q => ({
+    index: q.index,
+    questionId: q.questionId,
+    text: q.text,
+    propositions: q.propositions,
+    correct: q.correct,
+    chosen: q.chosen,
+    answeredBy: q.answeredBy,
+    correctA: q.correctA,
+    correctB: q.correctB,
+    explanation: q.explanation ?? null,
+    responseTime: q.responseTime,
+  }))
+
   const summary = {
     gameId: game.id,
-    status: 'FINISHED',
+    status: 'FINISHED' as const,
     winnerId,
     scoreA: game.scoreA,
     scoreB: game.scoreB,
@@ -203,18 +303,13 @@ function finishGame(game: GameSession, forcedWinnerId: string | null, forfeit: b
     correctB: game.correctB,
     avgTimeA: avg(game.timesA),
     avgTimeB: avg(game.timesB),
+    bestStreakA: game.bestStreakA,
+    bestStreakB: game.bestStreakB,
+    totalQuestions: game.questions.length,
     forfeit,
-    questions: game.questions.map(q => ({
-      index: q.index,
-      text: q.text,
-      propositions: q.propositions,
-      correct: q.correct,
-      chosen: q.chosen,
-      answeredBy: q.answeredBy,
-      correctA: q.correctA,
-      correctB: q.correctB,
-      explanation: q.explanation,
-    })),
+    playerA: publicPlayer(game.playerA),
+    playerB: publicPlayer(game.playerB),
+    questions,
   }
 
   pushEvent(game.playerA.userId, 'game:finished', { ...summary, youAre: 'A' })
@@ -225,124 +320,216 @@ function finishGame(game: GameSession, forcedWinnerId: string | null, forfeit: b
   state.userToGame.delete(game.playerA.userId)
   state.userToGame.delete(game.playerB.userId)
 
-  setTimeout(() => state.games.delete(game.id), 5 * 60 * 1000)
+  // Écriture unique en base, côté serveur.
+  if (!game.persisted) {
+    game.persisted = true
+    persistFinishedGame({
+      playerAId: game.playerA.userId,
+      playerBId: game.playerB.userId,
+      categoryFilter: game.categoryFilter,
+      questions,
+      totalQuestions: game.questions.length,
+      scoreA: game.scoreA,
+      scoreB: game.scoreB,
+      correctA: game.correctA,
+      correctB: game.correctB,
+      avgTimeA: summary.avgTimeA,
+      avgTimeB: summary.avgTimeB,
+      streakA: game.bestStreakA,
+      streakB: game.bestStreakB,
+      winnerId,
+      forfeit,
+      startedAt: new Date(game.createdAt),
+    })
+      .then(() => {
+        // Le client rafraîchit son profil dès qu'il reçoit cet événement.
+        pushEvent(game.playerA.userId, 'profile:refresh', { gameId: game.id })
+        pushEvent(game.playerB.userId, 'profile:refresh', { gameId: game.id })
+      })
+      .catch(err => {
+        console.error('[realtime] échec de la persistance de la partie', err)
+      })
+  }
+
+  const cleanup = setTimeout(() => state.games.delete(game.id), 5 * 60 * 1000)
+  cleanup.unref?.()
 }
 
-// Process expired questions (timeout)
+/** Clôt les questions dont le temps imparti est écoulé. */
 function processTimeouts() {
   const now = Date.now()
   for (const game of state.games.values()) {
-    if (game.status !== 'IN_PROGRESS') continue
-    if (!game.questionStartedAt) continue
+    if (game.status !== 'IN_PROGRESS' || !game.questionStartedAt) continue
     const elapsed = (now - game.questionStartedAt) / 1000
-    if (elapsed >= game.timerSeconds + 1) {
-      const q = game.questions[game.currentTurn]
-      if (!q || q.answered) continue
-      q.answered = true
-      q.chosen = null
-      if (q.answeredBy === 'A') {
-        q.correctA = false
-        game.timesA.push(game.timerSeconds * 1000)
-      } else {
-        q.correctB = false
-        game.timesB.push(game.timerSeconds * 1000)
-      }
-      game.questionStartedAt = null
-      const result = {
-        gameId: game.id,
-        questionIndex: q.index,
-        correct: q.correct,
-        chosen: null,
-        isCorrect: false,
-        timeout: true,
-        scoreA: game.scoreA,
-        scoreB: game.scoreB,
-        correctA: game.correctA,
-        correctB: game.correctB,
-        answeredBy: q.answeredBy,
-      }
-      pushEvent(game.playerA.userId, 'game:question-result', result)
-      pushEvent(game.playerB.userId, 'game:question-result', result)
-      setTimeout(() => advanceGame(game), 2500)
+    if (elapsed < game.timerSeconds + 1) continue
+
+    const q = game.questions[game.currentTurn]
+    if (!q || q.answered) continue
+
+    q.answered = true
+    q.chosen = null
+    if (q.answeredBy === 'A') {
+      q.correctA = false
+      game.timesA.push(game.timerSeconds * 1000)
+      game.streakA = 0
+    } else {
+      q.correctB = false
+      game.timesB.push(game.timerSeconds * 1000)
+      game.streakB = 0
+    }
+    game.questionStartedAt = null
+
+    const result = {
+      gameId: game.id,
+      questionIndex: q.index,
+      correct: q.correct,
+      chosen: null,
+      isCorrect: false,
+      timeout: true,
+      points: 0,
+      explanation: q.explanation ?? null,
+      scoreA: game.scoreA,
+      scoreB: game.scoreB,
+      correctA: game.correctA,
+      correctB: game.correctB,
+      streakA: game.streakA,
+      streakB: game.streakB,
+      answeredBy: q.answeredBy,
+    }
+    pushEvent(game.playerA.userId, 'game:question-result', result)
+    pushEvent(game.playerB.userId, 'game:question-result', result)
+    scheduleAdvance(game)
+  }
+}
+
+function expireInvitations() {
+  const now = Date.now()
+  for (const [id, inv] of state.invitations) {
+    if (now - inv.createdAt > GAME_CONFIG.invitationTtlMs) {
+      state.invitations.delete(id)
+      pushEvent(inv.fromUserId, 'invite:expired', { invitationId: id, toUserId: inv.toUserId })
+      pushEvent(inv.toUserId, 'invite:expired', { invitationId: id })
     }
   }
 }
 
-// Run timeout check periodically
-if (!(globalThis as any).__quizIntervalSet) {
-  ;(globalThis as any).__quizIntervalSet = true
-  setInterval(processTimeouts, 2000)
+// ---------------------------------------------------------------------------
+// API publique
+// ---------------------------------------------------------------------------
+
+export interface StartQuestionInput {
+  questionId: string
+  text: string
+  propositions: Record<Choice, string>
+  correct: Choice
+  explanation?: string | null
+  categoryId: string
+  categoryName?: string | null
+  difficulty?: string | null
 }
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
-
 export const realtime = {
-  // Presence
-  join(userId: string, pseudo: string, avatarUrl: string | null, country: string, level: number) {
-    // If the player was in a game, forfeit it (they're loading a fresh page)
+  join(
+    userId: string,
+    pseudo: string,
+    avatarUrl: string | null,
+    country: string,
+    level: number
+  ) {
+    // Un joueur qui recharge la page en pleine partie abandonne celle-ci.
     const existing = state.onlinePlayers.get(userId)
     if (existing && existing.status === 'IN_GAME') {
       const gameId = state.userToGame.get(userId)
-      if (gameId) {
-        const game = state.games.get(gameId)
-        if (game && game.status === 'IN_PROGRESS') {
-          const winnerId = userId === game.playerA.userId ? game.playerB.userId : game.playerA.userId
-          finishGame(game, winnerId, true)
-        }
+      const game = gameId ? state.games.get(gameId) : null
+      if (game && game.status === 'IN_PROGRESS') {
+        const winnerId =
+          userId === game.playerA.userId ? game.playerB.userId : game.playerA.userId
+        finishGame(game, winnerId, true)
       }
     }
+
     const player: OnlinePlayer = {
       userId,
       pseudo,
-      avatarUrl,
-      country,
-      level,
+      avatarUrl: avatarUrl ?? null,
+      country: country || 'France',
+      level: level || 1,
       status: 'AVAILABLE',
       lastPoll: Date.now(),
+      joinedAt: existing?.joinedAt ?? Date.now(),
     }
     state.onlinePlayers.set(userId, player)
     broadcastPresence()
-    return player
+    // Le joueur qui vient d'arriver reçoit immédiatement la liste courante.
+    return { player, players: presenceList() }
   },
 
   leave(userId: string) {
     const gameId = state.userToGame.get(userId)
-    if (gameId) {
-      const game = state.games.get(gameId)
-      if (game && game.status === 'IN_PROGRESS') {
-        const winnerId = userId === game.playerA.userId ? game.playerB.userId : game.playerA.userId
-        finishGame(game, winnerId, true)
-      }
+    const game = gameId ? state.games.get(gameId) : null
+    if (game && game.status === 'IN_PROGRESS') {
+      const winnerId =
+        userId === game.playerA.userId ? game.playerB.userId : game.playerA.userId
+      finishGame(game, winnerId, true)
+    }
+    // Les invitations émises ou reçues par ce joueur n'ont plus lieu d'être.
+    for (const [id, inv] of state.invitations) {
+      if (inv.fromUserId === userId || inv.toUserId === userId) state.invitations.delete(id)
     }
     state.onlinePlayers.delete(userId)
     state.userEvents.delete(userId)
     broadcastPresence()
   },
 
-  poll(userId: string): { events: Array<{ id: string; type: string; data: any; createdAt: number }> } {
+  poll(userId: string) {
     const player = state.onlinePlayers.get(userId)
-    if (player) {
-      player.lastPoll = Date.now()
-    }
+    if (player) player.lastPoll = Date.now()
     const events = state.userEvents.get(userId) || []
-    // Clear events after polling
     state.userEvents.set(userId, [])
-    return { events }
+    return { events, online: !!player }
   },
 
-  // Invitations
-  sendInvite(fromUserId: string, toUserId: string, categoryFilter: string | null): { ok: boolean; invitationId?: string; error?: string } {
+  /** Partie en cours pour ce joueur, s'il y en a une (reprise après rechargement). */
+  currentGame(userId: string) {
+    const gameId = state.userToGame.get(userId)
+    const game = gameId ? state.games.get(gameId) : null
+    if (!game || game.status !== 'IN_PROGRESS') return null
+    return {
+      game: publicGame(game),
+      youAre: game.playerA.userId === userId ? ('A' as const) : ('B' as const),
+    }
+  },
+
+  // ----- Invitations -----
+
+  sendInvite(
+    fromUserId: string,
+    toUserId: string,
+    categoryFilter: string | null
+  ): { ok: boolean; invitationId?: string; error?: string } {
+    if (fromUserId === toUserId) {
+      return { ok: false, error: 'Vous ne pouvez pas vous défier vous-même' }
+    }
     const from = state.onlinePlayers.get(fromUserId)
     const to = state.onlinePlayers.get(toUserId)
-    if (!to) return { ok: false, error: 'Joueur hors ligne' }
-    if (to.status === 'IN_GAME') return { ok: false, error: 'Joueur déjà en partie' }
+    if (!from) return { ok: false, error: "Vous n'êtes plus connecté au salon" }
+    if (!to) return { ok: false, error: 'Ce joueur est hors ligne' }
+    if (from.status === 'IN_GAME') return { ok: false, error: 'Vous êtes déjà en partie' }
+    if (to.status === 'IN_GAME') return { ok: false, error: 'Ce joueur est déjà en partie' }
+
+    // Une seule invitation en attente par couple de joueurs.
+    for (const inv of state.invitations.values()) {
+      if (inv.fromUserId === fromUserId && inv.toUserId === toUserId) {
+        return { ok: false, error: 'Une invitation est déjà en attente' }
+      }
+    }
+
     const invitation: Invitation = {
       id: uid('inv'),
       fromUserId,
-      fromPseudo: from?.pseudo || '',
-      fromAvatarUrl: from?.avatarUrl || null,
+      fromPseudo: from.pseudo,
+      fromAvatarUrl: from.avatarUrl,
+      fromLevel: from.level,
       toUserId,
       categoryFilter,
       createdAt: Date.now(),
@@ -352,52 +539,103 @@ export const realtime = {
     return { ok: true, invitationId: invitation.id }
   },
 
-  respondInvite(userId: string, invitationId: string, accept: boolean): { ok: boolean; error?: string; categoryFilter?: string | null; opponentId?: string; opponentPseudo?: string } {
+  respondInvite(
+    userId: string,
+    invitationId: string,
+    accept: boolean
+  ): {
+    ok: boolean
+    error?: string
+    categoryFilter?: string | null
+    opponentId?: string
+    opponentPseudo?: string
+  } {
     const inv = state.invitations.get(invitationId)
-    if (!inv) return { ok: false, error: 'Invitation introuvable' }
+    if (!inv) return { ok: false, error: 'Invitation introuvable ou expirée' }
     if (inv.toUserId !== userId) return { ok: false, error: 'Non autorisé' }
 
+    state.invitations.delete(invitationId)
+
     if (!accept) {
-      pushEvent(inv.fromUserId, 'invite:declined', { invitationId: inv.id, byPseudo: state.onlinePlayers.get(userId)?.pseudo })
-      state.invitations.delete(invitationId)
+      pushEvent(inv.fromUserId, 'invite:declined', {
+        invitationId: inv.id,
+        byPseudo: state.onlinePlayers.get(userId)?.pseudo,
+      })
       return { ok: true }
     }
 
     const playerA = state.onlinePlayers.get(inv.fromUserId)
     const playerB = state.onlinePlayers.get(inv.toUserId)
-    if (!playerA || !playerB) return { ok: false, error: 'Un joueur est hors ligne' }
+    if (!playerA) return { ok: false, error: "L'adversaire s'est déconnecté" }
+    if (!playerB) return { ok: false, error: "Vous n'êtes plus connecté au salon" }
+    if (playerA.status === 'IN_GAME') {
+      return { ok: false, error: "L'adversaire a déjà lancé une partie" }
+    }
 
-    // Notify the inviter to prepare the game (fetch questions and call startGame)
+    // L'invitant charge les questions puis appelle `startGame`.
     pushEvent(inv.fromUserId, 'game:prepare', {
       opponentId: inv.toUserId,
       opponentPseudo: playerB.pseudo,
       opponentAvatarUrl: playerB.avatarUrl,
+      opponentLevel: playerB.level,
       categoryFilter: inv.categoryFilter,
     })
-    state.invitations.delete(invitationId)
-    return { ok: true, categoryFilter: inv.categoryFilter, opponentId: inv.toUserId, opponentPseudo: playerB.pseudo }
+    pushEvent(inv.toUserId, 'game:pending', { opponentPseudo: playerA.pseudo })
+
+    return {
+      ok: true,
+      categoryFilter: inv.categoryFilter,
+      opponentId: inv.toUserId,
+      opponentPseudo: playerB.pseudo,
+    }
   },
 
-  cancelInvite(invitationId: string) {
+  cancelInvite(userId: string, invitationId: string) {
+    const inv = state.invitations.get(invitationId)
+    if (!inv || inv.fromUserId !== userId) return { ok: false, error: 'Invitation introuvable' }
     state.invitations.delete(invitationId)
+    pushEvent(inv.toUserId, 'invite:cancelled', { invitationId })
+    return { ok: true }
   },
 
-  // Game
-  startGame(fromUserId: string, opponentId: string, categoryFilter: string | null, questions: Array<any>): { ok: boolean; gameId?: string; error?: string } {
+  // ----- Partie -----
+
+  startGame(
+    fromUserId: string,
+    opponentId: string,
+    categoryFilter: string | null,
+    questions: StartQuestionInput[]
+  ): { ok: boolean; gameId?: string; error?: string } {
     const playerA = state.onlinePlayers.get(fromUserId)
     const playerB = state.onlinePlayers.get(opponentId)
-    if (!playerA || !playerB) return { ok: false, error: 'Adversaire introuvable' }
+    if (!playerA) return { ok: false, error: "Vous n'êtes plus connecté au salon" }
+    if (!playerB) return { ok: false, error: 'Adversaire introuvable' }
+    if (playerA.status === 'IN_GAME' || playerB.status === 'IN_GAME') {
+      return { ok: false, error: 'Un des joueurs est déjà en partie' }
+    }
+    if (!Array.isArray(questions) || questions.length < 4) {
+      return { ok: false, error: 'Pas assez de questions pour lancer la partie' }
+    }
 
-    const qs: GameQuestion[] = questions.slice(0, 20).map((q, i) => ({
+    // Nombre pair de questions : chaque joueur en traite exactement la moitié.
+    const count = Math.min(questions.length, GAME_CONFIG.questionsPerGame)
+    const evenCount = count - (count % 2)
+
+    const qs: GameQuestion[] = questions.slice(0, evenCount).map((q, i) => ({
       index: i,
       questionId: q.questionId,
       text: q.text,
       propositions: q.propositions,
       correct: q.correct,
-      explanation: q.explanation,
+      explanation: q.explanation ?? null,
       categoryId: q.categoryId,
+      categoryName: q.categoryName ?? null,
+      difficulty: q.difficulty ?? null,
       answeredBy: i % 2 === 0 ? 'A' : 'B',
       answered: false,
+      chosen: null,
+      correctA: null,
+      correctB: null,
     }))
 
     const gameId = uid('game')
@@ -412,16 +650,22 @@ export const realtime = {
       scoreB: 0,
       correctA: 0,
       correctB: 0,
+      streakA: 0,
+      streakB: 0,
+      bestStreakA: 0,
+      bestStreakB: 0,
       timesA: [],
       timesB: [],
       status: 'IN_PROGRESS',
-      questionStartedAt: Date.now(),
-      timerSeconds: 20,
+      questionStartedAt: null,
+      timerSeconds: GAME_CONFIG.timerSeconds,
       chat: [],
       createdAt: Date.now(),
       finishedAt: null,
-      events: [],
+      persisted: false,
+      advanceTimer: null,
     }
+
     state.games.set(gameId, session)
     state.userToGame.set(playerA.userId, gameId)
     state.userToGame.set(playerB.userId, gameId)
@@ -435,36 +679,62 @@ export const realtime = {
     return { ok: true, gameId }
   },
 
-  answerQuestion(userId: string, gameId: string, choice: 'A' | 'B' | 'C' | 'D' | null, responseTime: number): { ok: boolean; error?: string } {
+  answerQuestion(
+    userId: string,
+    gameId: string,
+    choice: Choice | null,
+    responseTime: number
+  ): { ok: boolean; error?: string } {
     const game = state.games.get(gameId)
     if (!game || game.status !== 'IN_PROGRESS') return { ok: false, error: 'Partie introuvable' }
+
     const q = game.questions[game.currentTurn]
-    if (!q || q.answered) return { ok: false, error: 'Question déjà répondue' }
+    if (!q || q.answered) return { ok: false, error: 'Question déjà traitée' }
 
     const isPlayerA = game.playerA.userId === userId
     const isPlayerB = game.playerB.userId === userId
     if (!isPlayerA && !isPlayerB) return { ok: false, error: 'Non autorisé' }
-    const expectedSide = q.answeredBy
-    if ((expectedSide === 'A' && !isPlayerA) || (expectedSide === 'B' && !isPlayerB)) return { ok: false, error: 'Pas votre tour' }
+    if ((q.answeredBy === 'A' && !isPlayerA) || (q.answeredBy === 'B' && !isPlayerB)) {
+      return { ok: false, error: "Ce n'est pas votre tour" }
+    }
+
+    // Le temps est recalculé côté serveur : un client ne peut pas s'attribuer
+    // un bonus de rapidité en annonçant un temps de réponse fantaisiste.
+    const elapsed = game.questionStartedAt
+      ? Date.now() - game.questionStartedAt
+      : Math.max(0, responseTime)
+    const clamped = Math.min(Math.max(elapsed, 0), game.timerSeconds * 1000)
 
     q.answered = true
     q.chosen = choice
-    q.responseTime = responseTime
-    const isCorrect = choice === q.correct
-    if (expectedSide === 'A') {
+    q.responseTime = clamped
+
+    const isCorrect = choice !== null && choice === q.correct
+    const points = isCorrect ? pointsFor(clamped, game.timerSeconds) : 0
+    q.pointsAwarded = points
+
+    if (q.answeredBy === 'A') {
       q.correctA = isCorrect
+      game.timesA.push(clamped)
       if (isCorrect) {
-        game.scoreA += pointsFor(responseTime)
+        game.scoreA += points
         game.correctA += 1
+        game.streakA += 1
+        game.bestStreakA = Math.max(game.bestStreakA, game.streakA)
+      } else {
+        game.streakA = 0
       }
-      game.timesA.push(responseTime)
     } else {
       q.correctB = isCorrect
+      game.timesB.push(clamped)
       if (isCorrect) {
-        game.scoreB += pointsFor(responseTime)
+        game.scoreB += points
         game.correctB += 1
+        game.streakB += 1
+        game.bestStreakB = Math.max(game.bestStreakB, game.streakB)
+      } else {
+        game.streakB = 0
       }
-      game.timesB.push(responseTime)
     }
     game.questionStartedAt = null
 
@@ -474,62 +744,95 @@ export const realtime = {
       correct: q.correct,
       chosen: q.chosen,
       isCorrect,
+      timeout: false,
+      points,
+      responseTime: clamped,
+      explanation: q.explanation ?? null,
       scoreA: game.scoreA,
       scoreB: game.scoreB,
       correctA: game.correctA,
       correctB: game.correctB,
+      streakA: game.streakA,
+      streakB: game.streakB,
       answeredBy: q.answeredBy,
     }
     pushEvent(game.playerA.userId, 'game:question-result', result)
     pushEvent(game.playerB.userId, 'game:question-result', result)
 
-    setTimeout(() => advanceGame(game), 2500)
+    scheduleAdvance(game)
     return { ok: true }
   },
 
-  sendChat(userId: string, gameId: string, content: string): { ok: boolean } {
+  sendChat(userId: string, gameId: string, content: string): { ok: boolean; error?: string } {
     const game = state.games.get(gameId)
-    if (!game) return { ok: false }
-    const sender = game.playerA.userId === userId ? game.playerA : game.playerB
-    if (!sender) return { ok: false }
+    if (!game) return { ok: false, error: 'Partie introuvable' }
+    const sender =
+      game.playerA.userId === userId
+        ? game.playerA
+        : game.playerB.userId === userId
+          ? game.playerB
+          : null
+    if (!sender) return { ok: false, error: 'Non autorisé' }
+
+    const trimmed = content.trim().slice(0, 300)
+    if (!trimmed) return { ok: false, error: 'Message vide' }
+
     const msg: ChatMessage = {
       id: uid('msg'),
       gameId: game.id,
       senderId: userId,
       senderPseudo: sender.pseudo,
-      content: content.slice(0, 500),
+      content: trimmed,
       timestamp: Date.now(),
     }
     game.chat.push(msg)
+    if (game.chat.length > 200) game.chat.shift()
     pushEvent(game.playerA.userId, 'game:chat:message', msg)
     pushEvent(game.playerB.userId, 'game:chat:message', msg)
     return { ok: true }
   },
 
-  leaveGame(userId: string, gameId: string) {
+  leaveGame(userId: string, gameId: string): { ok: boolean; error?: string } {
     const game = state.games.get(gameId)
-    if (!game) return
-    const winnerId = userId === game.playerA.userId ? game.playerB.userId : game.playerA.userId
+    if (!game) return { ok: false, error: 'Partie introuvable' }
+    if (game.playerA.userId !== userId && game.playerB.userId !== userId) {
+      return { ok: false, error: 'Non autorisé' }
+    }
+    const winnerId =
+      userId === game.playerA.userId ? game.playerB.userId : game.playerA.userId
     finishGame(game, winnerId, true)
+    return { ok: true }
   },
 
-  // Cleanup stale players (no poll in 30s)
+  /** Retire les joueurs qui n'interrogent plus le serveur. */
   cleanupStale() {
     const now = Date.now()
     const stale: string[] = []
-    for (const [userId, p] of state.onlinePlayers.entries()) {
-      if (now - p.lastPoll > 30000) {
-        stale.push(userId)
-      }
+    for (const [userId, p] of state.onlinePlayers) {
+      if (now - p.lastPoll > GAME_CONFIG.staleAfterMs) stale.push(userId)
     }
-    for (const userId of stale) {
-      this.leave(userId)
+    for (const userId of stale) realtime.leave(userId)
+  },
+
+  /** Instantané de l'état, pour la supervision. */
+  snapshot() {
+    return {
+      onlinePlayers: state.onlinePlayers.size,
+      activeGames: Array.from(state.games.values()).filter(g => g.status === 'IN_PROGRESS')
+        .length,
+      pendingInvitations: state.invitations.size,
     }
   },
 }
 
-// Run cleanup every 15 seconds
-if (!(globalThis as any).__quizCleanupSet) {
-  ;(globalThis as any).__quizCleanupSet = true
-  setInterval(() => realtime.cleanupStale(), 15000)
+// Boucles d'entretien, démarrées une seule fois par processus.
+if (!globalThis.__quizTimers) {
+  globalThis.__quizTimers = true
+  const timeouts = setInterval(processTimeouts, 1000)
+  const cleanup = setInterval(() => {
+    realtime.cleanupStale()
+    expireInvitations()
+  }, 10_000)
+  timeouts.unref?.()
+  cleanup.unref?.()
 }

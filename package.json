@@ -1,16 +1,23 @@
 {
-  "name": "nextjs_tailwind_shadcn_ts",
-  "version": "0.2.1",
+  "name": "qvgdm-quiz",
+  "version": "2.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
-    "start": "NODE_ENV=production bun .next/standalone/server.js 2>&1 | tee server.log",
+    "dev": "next dev -p 3000",
+    "build": "prisma generate && next build && node scripts/postbuild.mjs",
+    "start": "node .next/standalone/server.js",
+    "prestart:prod": "node scripts/prepare-db.mjs",
+    "start:prod": "node .next/standalone/server.js",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "db:push": "prisma db push --accept-data-loss",
     "db:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:reset": "prisma migrate reset"
+    "db:seed": "node scripts/seed.mjs --demo",
+    "db:prepare": "node scripts/prepare-db.mjs",
+    "db:reset": "prisma migrate reset",
+    "check:bank": "node scripts/check-bank.mjs",
+    "check:endpoints": "node scripts/check-endpoints.mjs",
+    "verify": "npm run typecheck && npm run check:bank"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

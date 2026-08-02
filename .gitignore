@@ -1,6 +1,6 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+# Voir https://help.github.com/articles/ignoring-files/
 
-# dependencies
+# Dépendances
 node_modules
 /.pnp
 .pnp.*
@@ -10,45 +10,46 @@ node_modules
 !.yarn/releases
 !.yarn/versions
 
-# testing
+# Tests
 /coverage
 
-# next.js
+# Next.js
 /.next/
 /out/
-
-# production
 /build
 
-# misc
+# Base de données SQLite locale (recréée par `npm run db:prepare`)
+/db/
+*.db
+*.db-journal
+*.sqlite
+
+# Variables d'environnement — ne jamais versionner de secret.
+# .env.example, lui, est suivi : il documente les variables attendues.
+.env
+.env.*
+!.env.example
+
+# Divers
 .DS_Store
 *.pem
+.vercel
 
-# debug
+# Journaux
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-
-# typescript
+# TypeScript
 *.tsbuildinfo
 next-env.d.ts
-local-*
+
+# Outillage de l'environnement de développement d'origine
 .claude
 .z-ai-config
-*.log
-dev.log
-dev.out.log
-test
-prompt
-
-server.log
-# Skills directory
+.zscripts/
 /skills/
+local-*
+prompt

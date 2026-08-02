@@ -1,15 +1,18 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { getUserFromRequest } from '@/lib/auth'
+import { NextRequest } from 'next/server'
+import { z } from 'zod'
 import { realtime } from '@/lib/realtime'
+import { guarded, requireAuth, parseBody, ok, fail } from '@/lib/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-// POST /api/realtime/game-leave
-export async function POST(req: NextRequest) {
-  const auth = getUserFromRequest(req)
-  if (!auth) return NextResponse.json({ error: 'Non authentifié' }, { status: 401 })
-  const body = await req.json()
-  realtime.leaveGame(auth.userId, body.gameId)
-  return NextResponse.json({ ok: true })
-}
+const schema = z.object({ gameId: z.string().min(1) })
+
+// POST /api/realtime/game-leave — abandon. La victoire revient à l'adversaire.
+export const POST = guarded(async (req: NextRequest) => {
+  const auth = requireAuth(req)
+  const { gameId } = await parseBody(req, schema)
+  const result = realtime.leaveGame(auth.userId, gameId)
+  if (!result.ok) return fail(result.error || 'Abandon impossible', 409)
+  return ok({ ok: true })
+})

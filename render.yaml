@@ -1,0 +1,63 @@
+# Blueprint Render — « Qui veut gagner 20 millions ? »
+#
+# Déploiement : Render → New → Blueprint → sélectionner ce dépôt.
+# Render lit ce fichier et crée le service web décrit ci-dessous.
+#
+# Le moteur temps réel (présence, invitations, parties en cours) est conservé en
+# mémoire du processus : le service doit rester en une seule instance, sans
+# montée en charge horizontale. C'est une contrainte assumée de l'architecture.
+
+services:
+  - type: web
+    name: qvgdm-quiz
+    runtime: node
+    plan: free
+    region: frankfurt
+    # Une seule instance : l'état temps réel n'est pas partagé entre processus.
+    numInstances: 1
+
+    buildCommand: npm ci && npm run build
+    # prepare-db applique le schéma puis peuple la base si elle est vide.
+    startCommand: npm run db:prepare && npm run start:prod
+
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: NODE_ENV
+        value: production
+
+      # Base SQLite. Sur le plan gratuit, le disque est réinitialisé à chaque
+      # déploiement ou redémarrage : la base est alors recréée et re-peuplée
+      # automatiquement au lancement. Pour conserver les comptes créés par les
+      # joueurs, décommentez la section `disk` plus bas et remplacez cette
+      # valeur par « file:/var/data/qvgdm.db ».
+      - key: DATABASE_URL
+        value: file:/opt/render/project/src/db/qvgdm.db
+
+      # Secret de signature des jetons. `generateValue` demande à Render de
+      # produire une valeur aléatoire à la création du service ; elle reste
+      # ensuite stable, donc les sessions survivent aux redéploiements.
+      - key: JWT_SECRET
+        generateValue: true
+
+      # Compte administrateur créé au premier démarrage.
+      # Renseignez ces valeurs dans le tableau de bord Render avant le premier
+      # déploiement : sans elles, les identifiants par défaut s'appliquent.
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+
+      # « true » ajoute quinze joueurs de démonstration, utiles pour visualiser
+      # les classements sur un environnement de démonstration.
+      - key: SEED_DEMO_USERS
+        value: "false"
+
+    # Disque persistant — nécessite un plan payant (Starter ou supérieur).
+    # Sans lui, les comptes créés par les joueurs disparaissent à chaque
+    # redéploiement ; la banque de questions, elle, est toujours recréée.
+    #
+    # disk:
+    #   name: qvgdm-data
+    #   mountPath: /var/data
+    #   sizeGB: 1

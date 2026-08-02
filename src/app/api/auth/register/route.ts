@@ -1,58 +1,60 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
+import { z } from 'zod'
 import { db } from '@/lib/db'
-import { hashPassword, signToken } from '@/lib/auth'
+import { hashPassword, signToken, TOKEN_TTL_SECONDS } from '@/lib/auth'
+import { guarded, parseBody, ok, fail, rateLimit, clientIp } from '@/lib/api'
+import { publicUser } from '@/lib/user-dto'
 
 export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
+const schema = z.object({
+  email: z.string().trim().toLowerCase().email('adresse e-mail invalide').max(200),
+  password: z.string().min(8, '8 caractères minimum').max(200),
+  pseudo: z
+    .string()
+    .trim()
+    .min(2, '2 caractères minimum')
+    .max(24, '24 caractères maximum')
+    .regex(/^[\p{L}\p{N}_. -]+$/u, 'caractères non autorisés'),
+  fullName: z.string().trim().max(120).optional().or(z.literal('')),
+  country: z.string().trim().max(80).optional(),
+  phone: z.string().trim().max(40).optional().or(z.literal('')),
+})
 
 // POST /api/auth/register
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json()
-    const { email, password, pseudo, fullName, country, phone } = body as {
-      email?: string; password?: string; pseudo?: string; fullName?: string; country?: string; phone?: string
-    }
-    if (!email || !password || !pseudo) {
-      return NextResponse.json({ error: 'Champs requis manquants' }, { status: 400 })
-    }
-    if (password.length < 6) {
-      return NextResponse.json({ error: 'Mot de passe trop court (min 6)' }, { status: 400 })
-    }
-    const existing = await db.user.findUnique({ where: { email } })
-    if (existing) {
-      return NextResponse.json({ error: 'Email déjà utilisé' }, { status: 409 })
-    }
-    const user = await db.user.create({
-      data: {
-        email,
-        passwordHash: hashPassword(password),
-        pseudo,
-        fullName: fullName || null,
-        country: country || 'France',
-        phone: phone || null,
-        avatarUrl: null,
-        role: 'USER',
-      },
-    })
-    const token = signToken({ sub: user.id, role: user.role })
-    return NextResponse.json({
-      token,
-      user: {
-        id: user.id,
-        email: user.email,
-        pseudo: user.pseudo,
-        fullName: user.fullName,
-        country: user.country,
-        avatarUrl: user.avatarUrl,
-        role: user.role,
-        level: user.level,
-        xp: user.xp,
-        gamesPlayed: user.gamesPlayed,
-        wins: user.wins,
-        losses: user.losses,
-        totalScore: user.totalScore,
-      },
-    })
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'Erreur serveur' }, { status: 500 })
-  }
-}
+export const POST = guarded(async (req: NextRequest) => {
+  // 5 créations de compte par IP et par heure.
+  rateLimit(`register:${clientIp(req)}`, 5, 60 * 60_000)
+
+  const body = await parseBody(req, schema)
+
+  const existing = await db.user.findUnique({ where: { email: body.email } })
+  if (existing) return fail('Cette adresse e-mail est déjà utilisée', 409)
+
+  const user = await db.user.create({
+    data: {
+      email: body.email,
+      passwordHash: hashPassword(body.password),
+      pseudo: body.pseudo,
+      fullName: body.fullName || null,
+      country: body.country || 'France',
+      phone: body.phone || null,
+      avatarUrl: null,
+      role: 'USER',
+      lastSeenAt: new Date(),
+    },
+  })
+
+  await db.notification.create({
+    data: {
+      userId: user.id,
+      type: 'INFO',
+      title: 'Bienvenue !',
+      body: `Bonjour ${user.pseudo}, votre compte est prêt. Rendez-vous dans le salon pour défier un adversaire.`,
+    },
+  })
+
+  const token = signToken({ sub: user.id, role: user.role })
+  return ok({ token, expiresIn: TOKEN_TTL_SECONDS, user: publicUser(user) }, { status: 201 })
+})

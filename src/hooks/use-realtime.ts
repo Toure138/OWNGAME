@@ -2,44 +2,116 @@
 
 import { useEffect, useRef } from 'react'
 import { useApp } from '@/lib/store'
+import { playSound } from '@/lib/sound'
 
-// HTTP polling-based realtime client.
-// Polls /api/realtime/poll every 1.5s to receive events.
-// Sends actions via POST to /api/realtime/* endpoints.
+// Client temps réel par interrogation périodique.
+//
+// Le hook est monté une seule fois, dans l'enveloppe applicative. Il maintient
+// la présence dans le salon, distribue les événements de jeu via un bus, et se
+// réinscrit automatiquement si le serveur a redémarré.
 
-const POLL_INTERVAL = 1500 // ms
+const POLL_INTERVAL = 1200
+const MAX_BACKOFF = 10_000
+
+// ---------------------------------------------------------------------------
+// Bus d'événements
+// ---------------------------------------------------------------------------
+// Les écrans de jeu se montent parfois après l'arrivée du premier événement :
+// les événements de partie sont donc mémorisés pour être rejoués aux abonnés
+// tardifs.
+
+type Listener = (data: unknown) => void
+
+const BUFFERED = new Set([
+  'game:started',
+  'game:question',
+  'game:question-result',
+  'game:finished',
+])
+
+class EventBus {
+  private listeners = new Map<string, Set<Listener>>()
+  private buffer = new Map<string, unknown>()
+
+  on(event: string, fn: Listener) {
+    if (!this.listeners.has(event)) this.listeners.set(event, new Set())
+    this.listeners.get(event)!.add(fn)
+    if (this.buffer.has(event)) {
+      const data = this.buffer.get(event)
+      // Différé d'un tick : l'abonné termine son rendu avant de recevoir.
+      setTimeout(() => fn(data), 0)
+    }
+    return () => this.off(event, fn)
+  }
+
+  off(event: string, fn: Listener) {
+    this.listeners.get(event)?.delete(fn)
+  }
+
+  emit(event: string, data: unknown) {
+    if (BUFFERED.has(event)) this.buffer.set(event, data)
+    this.listeners.get(event)?.forEach(fn => fn(data))
+  }
+
+  clearBuffer(event?: string) {
+    if (event) this.buffer.delete(event)
+    else this.buffer.clear()
+  }
+}
+
+export const eventBus = new EventBus()
+
+/** Vide la mémoire des événements de partie (retour au salon, nouvelle partie). */
+export function clearGameBuffer() {
+  eventBus.clearBuffer('game:started')
+  eventBus.clearBuffer('game:question')
+  eventBus.clearBuffer('game:question-result')
+  eventBus.clearBuffer('game:finished')
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
 
 export function useRealtime() {
   const token = useApp(s => s.token)
-  const user = useApp(s => s.user)
-  const setOnlinePlayers = useApp(s => s.setOnlinePlayers)
-  const setConnected = useApp(s => s.setConnected)
-  const addNotification = useApp(s => s.addNotification)
-  const addInvitation = useApp(s => s.addInvitation)
-  const removeInvitation = useApp(s => s.removeInvitation)
-  const setView = useApp(s => s.setView)
-  const initializedRef = useRef(false)
+  const userId = useApp(s => s.user?.id)
+  const startedRef = useRef(false)
 
   useEffect(() => {
-    if (!token || !user) return
-    if (initializedRef.current) return
-    initializedRef.current = true
+    if (!token || !userId) return
+    if (startedRef.current) return
+    startedRef.current = true
 
     let stopped = false
-    let pollTimer: ReturnType<typeof setTimeout> | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let failures = 0
 
-    const headers = () => ({ Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' })
+    const store = useApp.getState
+    const headers = () => ({
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    })
 
-    async function join() {
+    async function join(): Promise<boolean> {
       try {
-        await fetch('/api/realtime/join', {
-          method: 'POST',
-          headers: headers(),
-          body: JSON.stringify({ pseudo: user.pseudo, avatarUrl: user.avatarUrl, country: user.country, level: user.level }),
-        })
-        setConnected(true)
-      } catch (e) {
-        console.error('[realtime] join failed', e)
+        const res = await fetch('/api/realtime/join', { method: 'POST', headers: headers() })
+        if (!res.ok) {
+          store().setConnected(false)
+          return false
+        }
+        const data = await res.json()
+        store().setOnlinePlayers(data.players || [])
+        store().setConnected(true)
+        // Partie encore en cours côté serveur après un rechargement de page.
+        if (data.currentGame) {
+          eventBus.emit('game:started', data.currentGame)
+          store().setView('game')
+        }
+        return true
+      } catch {
+        store().setConnected(false)
+        return false
       }
     }
 
@@ -47,169 +119,146 @@ export function useRealtime() {
       if (stopped) return
       try {
         const res = await fetch('/api/realtime/poll', { method: 'POST', headers: headers() })
-        if (!res.ok) return
+        if (!res.ok) throw new Error(String(res.status))
+
         const data = await res.json()
-        const events = data.events || []
-        for (const evt of events) {
+        failures = 0
+        store().setConnected(true)
+
+        // Le serveur ne nous connaît plus (redémarrage, inactivité) : on se
+        // réinscrit sans intervention de l'utilisateur.
+        if (data.online === false) {
+          await join()
+        }
+
+        for (const evt of data.events || []) {
           handleEvent(evt.type, evt.data)
         }
-      } catch (e) {
-        // ignore
+      } catch {
+        failures++
+        if (failures > 2) store().setConnected(false)
       } finally {
         if (!stopped) {
-          pollTimer = setTimeout(poll, POLL_INTERVAL)
+          // Ralentissement progressif quand le serveur ne répond plus, pour ne
+          // pas marteler une instance en cours de redémarrage.
+          const delay =
+            failures > 0 ? Math.min(POLL_INTERVAL * 2 ** failures, MAX_BACKOFF) : POLL_INTERVAL
+          timer = setTimeout(poll, delay)
         }
       }
     }
 
     function handleEvent(type: string, data: any) {
+      const s = store()
       switch (type) {
         case 'presence:update':
-          setOnlinePlayers((data || []).filter((p: any) => p.userId !== user.id))
+          s.setOnlinePlayers((data || []).filter((p: any) => p.userId !== userId))
           break
+
         case 'invite:received':
-          addInvitation(data)
-          addNotification({
-            id: Math.random().toString(36).slice(2),
-            type: 'INVITE',
-            title: 'Invitation reçue',
-            body: `${data.fromPseudo} vous invite à jouer`,
-            read: false,
-            createdAt: new Date().toISOString(),
-          })
+          s.addInvitation(data)
+          if (s.soundEnabled) playSound('invite')
           break
+
         case 'invite:declined':
-          removeInvitation(data.invitationId)
+          s.removeInvitation(data.invitationId)
+          if (s.pendingInvite?.invitationId === data.invitationId) s.setPendingInvite(null)
+          eventBus.emit('invite:declined', data)
           break
-        case 'game:prepare':
-          // The inviter receives this when their invite is accepted.
-          // Emit to the event bus so the LobbyScreen can show the GamePrepareModal.
-          eventBus.emit('game:prepare', data)
-          break
-        case 'game:started':
+
+        case 'invite:cancelled':
+        case 'invite:expired':
+          s.removeInvitation(data.invitationId)
+          if (s.pendingInvite?.invitationId === data.invitationId) s.setPendingInvite(null)
           eventBus.emit(type, data)
-          setView('game')
           break
+
+        case 'game:prepare':
+        case 'game:pending':
+          eventBus.emit(type, data)
+          break
+
+        case 'game:started':
+          clearGameBuffer()
+          eventBus.emit('game:started', data)
+          s.setPendingInvite(null)
+          s.setView('game')
+          if (s.soundEnabled) playSound('start')
+          break
+
         case 'game:question':
         case 'game:question-result':
         case 'game:finished':
         case 'game:chat:message':
-          // These are handled by the GameScreen via the event bus
           eventBus.emit(type, data)
           break
-        case 'notification':
-          addNotification({
-            id: Math.random().toString(36).slice(2),
-            type: data.type,
-            title: data.title,
-            body: data.body,
-            read: false,
-            createdAt: new Date(data.createdAt || Date.now()).toISOString(),
-          })
+
+        case 'profile:refresh':
+          void refreshProfile()
           break
       }
     }
 
-    join().then(() => poll())
+    async function refreshProfile() {
+      try {
+        const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+        if (!res.ok) return
+        const data = await res.json()
+        if (data.user) store().updateUser(data.user)
+      } catch {
+        // Le rafraîchissement est opportuniste.
+      }
+    }
 
-    // Cleanup on unmount or logout
+    void join().then(() => poll())
+
+    // À la fermeture de l'onglet, aucun appel authentifié n'est possible :
+    // `sendBeacon` ne transporte pas d'en-tête Authorization. C'est le nettoyage
+    // périodique côté serveur (30 s sans interrogation) qui libère la place.
     return () => {
       stopped = true
-      if (pollTimer) clearTimeout(pollTimer)
-      // Don't leave on unmount - the user is still logged in
+      startedRef.current = false
+      if (timer) clearTimeout(timer)
     }
-  }, [token, user])
-
-  return { ready: true }
+  }, [token, userId])
 }
 
-// Simple event bus for game events (so GameScreen can listen)
-// Buffers events so listeners that mount after an event is emitted can still receive it.
-type Listener = (data: any) => void
-class EventBus {
-  private listeners = new Map<string, Set<Listener>>()
-  private buffer = new Map<string, any>()
+// ---------------------------------------------------------------------------
+// Actions
+// ---------------------------------------------------------------------------
 
-  on(event: string, fn: Listener) {
-    if (!this.listeners.has(event)) this.listeners.set(event, new Set())
-    this.listeners.get(event)!.add(fn)
-    // If there's a buffered event, deliver it immediately
-    if (this.buffer.has(event)) {
-      setTimeout(() => fn(this.buffer.get(event)), 0)
-    }
-    return () => this.off(event, fn)
-  }
-  off(event: string, fn: Listener) {
-    this.listeners.get(event)?.delete(fn)
-  }
-  emit(event: string, data: any) {
-    // Buffer the latest event for late subscribers
-    if (event === 'game:started' || event === 'game:question' || event === 'game:question-result' || event === 'game:finished') {
-      this.buffer.set(event, data)
-    }
-    this.listeners.get(event)?.forEach(fn => fn(data))
-  }
-  clearBuffer(event?: string) {
-    if (event) {
-      this.buffer.delete(event)
-    } else {
-      this.buffer.clear()
-    }
-  }
-}
-export const eventBus = new EventBus()
-
-// Helper functions for sending realtime actions
-export async function sendInvite(token: string, toUserId: string, categoryFilter: string | null) {
-  const res = await fetch('/api/realtime/invite', {
-    method: 'POST',
+async function send<T = any>(url: string, token: string, body?: unknown, method = 'POST'): Promise<T> {
+  const res = await fetch(url, {
+    method,
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ toUserId, categoryFilter }),
+    body: body === undefined ? undefined : JSON.stringify(body),
   })
-  return res.json()
+  const data = await res.json().catch(() => ({}))
+  if (!res.ok) return { ok: false, error: data.error || 'Erreur réseau', ...data } as T
+  return { ok: true, ...data } as T
 }
 
-export async function respondInvite(token: string, invitationId: string, accept: boolean) {
-  const res = await fetch('/api/realtime/invite-respond', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ invitationId, accept }),
-  })
-  return res.json()
-}
+export const sendInvite = (token: string, toUserId: string, categoryFilter: string | null) =>
+  send('/api/realtime/invite', token, { toUserId, categoryFilter })
 
-export async function startGame(token: string, opponentId: string, categoryFilter: string | null, questions: any[]) {
-  const res = await fetch('/api/realtime/game-start', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ opponentId, categoryFilter, questions }),
-  })
-  return res.json()
-}
+export const cancelInvite = (token: string, invitationId: string) =>
+  send('/api/realtime/invite', token, { invitationId }, 'DELETE')
 
-export async function answerQuestion(token: string, gameId: string, choice: 'A' | 'B' | 'C' | 'D' | null, responseTime: number) {
-  const res = await fetch('/api/realtime/game-answer', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ gameId, choice, responseTime }),
-  })
-  return res.json()
-}
+export const respondInvite = (token: string, invitationId: string, accept: boolean) =>
+  send('/api/realtime/invite-respond', token, { invitationId, accept })
 
-export async function sendChat(token: string, gameId: string, content: string) {
-  const res = await fetch('/api/realtime/game-chat', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ gameId, content }),
-  })
-  return res.json()
-}
+export const startGame = (token: string, opponentId: string, categoryFilter: string | null) =>
+  send('/api/realtime/game-start', token, { opponentId, categoryFilter })
 
-export async function leaveGame(token: string, gameId: string) {
-  const res = await fetch('/api/realtime/game-leave', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ gameId }),
-  })
-  return res.json()
-}
+export const answerQuestion = (
+  token: string,
+  gameId: string,
+  choice: 'A' | 'B' | 'C' | 'D' | null,
+  responseTime: number
+) => send('/api/realtime/game-answer', token, { gameId, choice, responseTime })
+
+export const sendChat = (token: string, gameId: string, content: string) =>
+  send('/api/realtime/game-chat', token, { gameId, content })
+
+export const leaveGame = (token: string, gameId: string) =>
+  send('/api/realtime/game-leave', token, { gameId })

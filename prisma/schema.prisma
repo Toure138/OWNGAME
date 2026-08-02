@@ -1,4 +1,4 @@
-// Prisma schema for "Qui veut gagner 20 millions ?"
+// Schéma Prisma pour « Qui veut gagner 20 millions ? »
 
 generator client {
   provider = "prisma-client-js"
@@ -19,12 +19,16 @@ model User {
   country       String   @default("France")
   avatarUrl     String?
   role          String   @default("USER") // USER | ADMIN
+  banned        Boolean  @default(false)
   level         Int      @default(1)
   xp            Int      @default(0)
   gamesPlayed   Int      @default(0)
   wins          Int      @default(0)
   losses        Int      @default(0)
+  draws         Int      @default(0)
   totalScore    Int      @default(0)
+  bestStreak    Int      @default(0)
+  lastSeenAt    DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -32,6 +36,9 @@ model User {
   gamesAsPlayerB Game[]   @relation("PlayerB")
   notifications  Notification[]
   achievements   Achievement[]
+
+  @@index([totalScore])
+  @@index([country])
 }
 
 model Category {
@@ -45,65 +52,78 @@ model Category {
 }
 
 model Question {
-  id          String   @id @default(cuid())
-  text        String
-  propositionA String
-  propositionB String
-  propositionC String
-  propositionD String
-  correctAnswer String  // "A" | "B" | "C" | "D"
-  explanation String?
-  difficulty  String   @default("MEDIUM") // EASY | MEDIUM | HARD
-  categoryId  String
-  category    Category @relation(fields: [categoryId], references: [id])
-  timesAnswered Int    @default(0)
-  timesCorrect  Int    @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  text          String   @unique
+  propositionA  String
+  propositionB  String
+  propositionC  String
+  propositionD  String
+  correctAnswer String // "A" | "B" | "C" | "D"
+  explanation   String?
+  difficulty    String   @default("MEDIUM") // EASY | MEDIUM | HARD
+  categoryId    String
+  category      Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  timesAnswered Int      @default(0)
+  timesCorrect  Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([difficulty])
 }
 
 model Game {
-  id            String   @id @default(cuid())
-  playerAId     String
-  playerBId     String
-  status        String   @default("WAITING") // WAITING | IN_PROGRESS | FINISHED
-  categoryFilter String? // null = ALL
-  questionsData String   // JSON: array of { questionId, text, propositions, correct, whoAnswered, answeredByA, answeredByB, correctA, correctB, timeA, timeB }
-  currentTurn   Int      @default(0) // 0..19
-  scoreA        Int      @default(0)
-  scoreB        Int      @default(0)
-  correctA      Int      @default(0)
-  correctB      Int      @default(0)
-  avgTimeA      Float    @default(0)
-  avgTimeB      Float    @default(0)
-  winnerId      String?
-  startedAt     DateTime?
-  finishedAt    DateTime?
-  createdAt     DateTime @default(now())
+  id             String    @id @default(cuid())
+  playerAId      String
+  playerBId      String
+  status         String    @default("WAITING") // WAITING | IN_PROGRESS | FINISHED
+  categoryFilter String? // null = toutes catégories
+  questionsData  String // JSON : détail de chaque question de la partie
+  totalQuestions Int       @default(20)
+  currentTurn    Int       @default(0)
+  scoreA         Int       @default(0)
+  scoreB         Int       @default(0)
+  correctA       Int       @default(0)
+  correctB       Int       @default(0)
+  avgTimeA       Float     @default(0)
+  avgTimeB       Float     @default(0)
+  winnerId       String?
+  forfeit        Boolean   @default(false)
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime  @default(now())
 
-  playerA User @relation("PlayerA", fields: [playerAId], references: [id])
-  playerB User @relation("PlayerB", fields: [playerBId], references: [id])
+  playerA User @relation("PlayerA", fields: [playerAId], references: [id], onDelete: Cascade)
+  playerB User @relation("PlayerB", fields: [playerBId], references: [id], onDelete: Cascade)
+
+  @@index([playerAId])
+  @@index([playerBId])
+  @@index([finishedAt])
 }
 
 model Notification {
   id        String   @id @default(cuid())
   userId    String
-  type      String   // INVITE | GAME_WON | GAME_LOST | RANK_UP | INFO
+  type      String // INVITE | GAME_WON | GAME_LOST | GAME_DRAW | ACHIEVEMENT | RANK_UP | INFO
   title     String
   body      String
   read      Boolean  @default(false)
   createdAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, read])
+  @@index([createdAt])
 }
 
 model Achievement {
-  id        String   @id @default(cuid())
-  userId    String
-  code      String   // FIRST_WIN | TEN_WINS | STREAK_3 | etc.
-  name      String
+  id          String   @id @default(cuid())
+  userId      String
+  code        String // FIRST_WIN | TEN_WINS | STREAK_3 | …
+  name        String
   description String
-  unlockedAt DateTime @default(now())
-  user      User     @relation(fields: [userId], references: [id])
+  unlockedAt  DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, code])
+  @@index([userId])
 }

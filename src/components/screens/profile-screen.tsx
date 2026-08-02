@@ -2,18 +2,21 @@
 
 import { useEffect, useState } from 'react'
 import { useApp } from '@/lib/store'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { COUNTRIES } from '@/components/screens/auth-screen'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Progress } from '@/components/ui/progress'
-import { Trophy, Star, Target, TrendingUp, Save, Crown } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { PlayerAvatar } from '@/components/ui/player-avatar'
+import { StatTile } from '@/components/ui/stat-tile'
 import { useToast } from '@/hooks/use-toast'
-
-const COUNTRIES = ['France', 'Belgique', 'Suisse', 'Canada', 'Maroc', 'Algérie', 'Tunisie', 'Sénégal', 'Côte d\'Ivoire', 'Cameroun', 'Espagne', 'Italie', 'Portugal', 'Allemagne', 'Royaume-Uni', 'États-Unis', 'Brésil', 'Mexique', 'Japon', 'Chine', 'Autre']
+import {
+  Trophy, Target, Star, TrendingUp, Save, Crown, Flame, Loader2, Globe2, KeyRound, Shield,
+} from 'lucide-react'
 
 export function ProfileScreen() {
   const user = useApp(s => s.user)!
@@ -22,179 +25,340 @@ export function ProfileScreen() {
   const setView = useApp(s => s.setView)
   const { toast } = useToast()
 
-  const [editing, setEditing] = useState(false)
-  const [pseudo, setPseudo] = useState(user.pseudo)
-  const [fullName, setFullName] = useState(user.fullName || '')
-  const [country, setCountry] = useState(user.country)
-  const [avatarUrl, setAvatarUrl] = useState(user.avatarUrl || '')
   const [saving, setSaving] = useState(false)
-  const [achievements, setAchievements] = useState<any[]>([])
+  const [profile, setProfile] = useState({
+    pseudo: user.pseudo,
+    fullName: user.fullName || '',
+    country: user.country,
+    avatarUrl: user.avatarUrl || '',
+    phone: user.phone || '',
+  })
+  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirm: '' })
 
+  // Le rang mondial et les compteurs sont recalculés à l'ouverture de l'écran :
+  // ils ont pu changer depuis la dernière partie.
   useEffect(() => {
-    fetch('/api/achievements', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json())
-      .then(d => setAchievements(d.achievements || []))
-  }, [token])
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => (r.ok ? r.json() : null))
+      .then(d => d?.user && updateUser(d.user))
+      .catch(() => undefined)
+  }, [token, updateUser])
 
-  async function save() {
+  async function saveProfile() {
     setSaving(true)
     try {
       const res = await fetch('/api/auth/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ pseudo, fullName, country, avatarUrl }),
+        body: JSON.stringify(profile),
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error)
       updateUser(data.user)
-      setEditing(false)
       toast({ title: 'Profil mis à jour' })
-    } catch (e: any) {
-      toast({ title: 'Erreur', description: e.message, variant: 'destructive' })
+    } catch (e) {
+      toast({
+        title: 'Échec de la mise à jour',
+        description: e instanceof Error ? e.message : 'Erreur inconnue',
+        variant: 'destructive',
+      })
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function changePassword() {
+    if (passwords.newPassword !== passwords.confirm) {
+      toast({
+        title: 'Les mots de passe ne correspondent pas',
+        variant: 'destructive',
+      })
+      return
+    }
+    if (passwords.newPassword.length < 8) {
+      toast({ title: 'Mot de passe trop court', description: '8 caractères minimum.', variant: 'destructive' })
+      return
+    }
+    setSaving(true)
+    try {
+      const res = await fetch('/api/auth/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          currentPassword: passwords.currentPassword,
+          newPassword: passwords.newPassword,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error)
+      setPasswords({ currentPassword: '', newPassword: '', confirm: '' })
+      toast({ title: 'Mot de passe modifié' })
+    } catch (e) {
+      toast({
+        title: 'Échec',
+        description: e instanceof Error ? e.message : 'Erreur inconnue',
+        variant: 'destructive',
+      })
     } finally {
       setSaving(false)
     }
   }
 
   const winRate = user.gamesPlayed > 0 ? Math.round((user.wins / user.gamesPlayed) * 100) : 0
-  const xpForNextLevel = (user.level * 500)
-  const xpProgress = (user.xp % 500) / 500 * 100
+  const xpInLevel = user.xp % 500
 
   return (
-    <div className="container mx-auto p-4 max-w-5xl">
-      <div className="grid lg:grid-cols-3 gap-4">
-        {/* Profile card */}
-        <Card className="lg:col-span-1 border-orange-200">
+    <div className="container mx-auto max-w-5xl px-3 sm:px-4">
+      <div className="grid gap-4 lg:grid-cols-3">
+        {/* Carte d'identité */}
+        <Card className="lg:col-span-1">
           <CardContent className="p-6 text-center">
-            <Avatar className="w-24 h-24 mx-auto mb-3">
-              <AvatarFallback className="bg-gradient-to-br from-amber-400 to-orange-600 text-white text-3xl font-bold">
-                {user.pseudo.slice(0, 2).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
-            <h2 className="text-xl font-bold text-orange-900">{user.pseudo}</h2>
-            <p className="text-sm text-muted-foreground">{user.email}</p>
-            <Badge variant="outline" className="mt-2">{user.country}</Badge>
-            {user.rank && (
-              <div className="mt-3 inline-flex items-center gap-1 px-3 py-1 rounded-full bg-amber-100 text-amber-800 text-sm font-medium">
-                <Crown className="w-3.5 h-3.5" /> Rang mondial #{user.rank}
-              </div>
-            )}
-            <div className="mt-4 p-3 rounded-lg bg-orange-50">
-              <div className="flex justify-between text-sm mb-1">
-                <span className="font-medium">Niveau {user.level}</span>
-                <span className="text-muted-foreground">{user.xp} / {xpForNextLevel} XP</span>
-              </div>
-              <Progress value={xpProgress} className="h-2" />
+            <PlayerAvatar
+              name={user.pseudo}
+              src={user.avatarUrl}
+              className="mx-auto mb-3 h-24 w-24 text-2xl"
+            />
+            <h2 className="text-xl font-bold">{user.pseudo}</h2>
+            <p className="truncate text-sm text-muted-foreground">{user.email}</p>
+
+            <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+              <Badge variant="outline" className="gap-1">
+                <Globe2 className="h-3 w-3" /> {user.country}
+              </Badge>
+              {user.role === 'ADMIN' && (
+                <Badge className="gap-1">
+                  <Shield className="h-3 w-3" /> Administrateur
+                </Badge>
+              )}
             </div>
-            {user.role === 'ADMIN' && (
-              <Button onClick={() => setView('admin')} variant="outline" className="w-full mt-3 border-orange-300 text-orange-700">
-                Accéder à l'administration
-              </Button>
+
+            {user.rank && (
+              <div className="mt-3 inline-flex items-center gap-1.5 rounded-full bg-amber-500/12 px-3 py-1 text-sm font-medium text-amber-700 dark:text-amber-400">
+                <Crown className="h-3.5 w-3.5" /> Rang mondial #{user.rank}
+                {user.nationalRank && (
+                  <span className="text-xs opacity-80">· #{user.nationalRank} national</span>
+                )}
+              </div>
             )}
+
+            <div className="mt-5 rounded-xl bg-muted/60 p-3 text-left">
+              <div className="mb-1.5 flex justify-between text-sm">
+                <span className="font-medium">Niveau {user.level}</span>
+                <span className="tabular-nums text-muted-foreground">{xpInLevel} / 500 XP</span>
+              </div>
+              <Progress value={(xpInLevel / 500) * 100} className="h-2" />
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                {500 - xpInLevel} XP avant le niveau {user.level + 1}
+              </p>
+            </div>
+
+            <div className="mt-3 flex flex-col gap-2">
+              <Button variant="outline" onClick={() => setView('achievements')} className="gap-2">
+                <Star className="h-4 w-4" /> Mes succès
+              </Button>
+              {user.role === 'ADMIN' && (
+                <Button variant="outline" onClick={() => setView('admin')} className="gap-2">
+                  <Shield className="h-4 w-4" /> Administration
+                </Button>
+              )}
+            </div>
           </CardContent>
         </Card>
 
-        {/* Stats */}
-        <div className="lg:col-span-2 space-y-4">
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-            <StatCard icon={<Trophy className="w-5 h-5" />} value={user.totalScore} label="Score total" color="text-amber-600 bg-amber-50" />
-            <StatCard icon={<Target className="w-5 h-5" />} value={user.gamesPlayed} label="Parties jouées" color="text-blue-600 bg-blue-50" />
-            <StatCard icon={<Star className="w-5 h-5" />} value={user.wins} label="Victoires" color="text-green-600 bg-green-50" />
-            <StatCard icon={<TrendingUp className="w-5 h-5" />} value={`${winRate}%`} label="Taux de victoire" color="text-purple-600 bg-purple-50" />
+        {/* Statistiques et réglages */}
+        <div className="space-y-4 lg:col-span-2">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <StatTile
+              icon={<Trophy className="h-4 w-4" />}
+              value={user.totalScore.toLocaleString('fr-FR')}
+              label="Score total"
+              tone="primary"
+            />
+            <StatTile
+              icon={<Target className="h-4 w-4" />}
+              value={user.gamesPlayed}
+              label="Parties jouées"
+              tone="info"
+            />
+            <StatTile
+              icon={<Star className="h-4 w-4" />}
+              value={user.wins}
+              label="Victoires"
+              hint={`${user.losses} défaite${user.losses > 1 ? 's' : ''}`}
+              tone="success"
+            />
+            <StatTile
+              icon={<TrendingUp className="h-4 w-4" />}
+              value={`${winRate}%`}
+              label="Taux de victoire"
+              tone="violet"
+            />
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-orange-900">Informations du profil</CardTitle>
-              <CardDescription>{editing ? 'Modifiez vos informations' : 'Vos informations personnelles'}</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {editing ? (
-                <>
-                  <div className="space-y-2">
-                    <Label>Pseudonyme</Label>
-                    <Input value={pseudo} onChange={e => setPseudo(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Nom complet</Label>
-                    <Input value={fullName} onChange={e => setFullName(e.target.value)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Pays</Label>
-                    <Select value={country} onValueChange={setCountry}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {COUNTRIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>URL de l'avatar (optionnel)</Label>
-                    <Input value={avatarUrl} onChange={e => setAvatarUrl(e.target.value)} placeholder="https://..." />
-                  </div>
-                  <div className="flex gap-2">
-                    <Button onClick={save} disabled={saving} className="bg-orange-600 hover:bg-orange-700">
-                      <Save className="w-4 h-4 mr-1" /> {saving ? 'Sauvegarde...' : 'Enregistrer'}
-                    </Button>
-                    <Button variant="outline" onClick={() => setEditing(false)}>Annuler</Button>
-                  </div>
-                </>
-              ) : (
-                <>
-                  <Row label="Pseudonyme" value={user.pseudo} />
-                  <Row label="Nom complet" value={user.fullName || '—'} />
-                  <Row label="Email" value={user.email} />
-                  <Row label="Téléphone" value={user.phone || '—'} />
-                  <Row label="Pays" value={user.country} />
-                  <Row label="Défaites" value={String(user.losses)} />
-                  <Row label="Membre depuis" value={user.createdAt ? new Date(user.createdAt).toLocaleDateString('fr-FR') : '—'} />
-                  <Button variant="outline" onClick={() => setEditing(true)} className="mt-2">Modifier le profil</Button>
-                </>
-              )}
-            </CardContent>
-          </Card>
+          {(user.bestStreak ?? 0) > 0 && (
+            <Card className="border-orange-500/30 bg-orange-500/5">
+              <CardContent className="flex items-center gap-3 p-3.5">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500/15 text-orange-500">
+                  <Flame className="h-5 w-5" />
+                </div>
+                <div>
+                  <p className="font-semibold">
+                    Meilleure série : {user.bestStreak} bonnes réponses d&apos;affilée
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Enchaînez sans erreur pour battre votre record.
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Achievements */}
           <Card>
-            <CardHeader>
-              <CardTitle className="text-orange-900 flex items-center gap-2"><Trophy className="w-5 h-5" /> Succès & Badges</CardTitle>
-              <CardDescription>{achievements.filter(a => a.unlocked).length} / {achievements.length} débloqués</CardDescription>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-lg">Paramètres du compte</CardTitle>
+              <CardDescription>Modifiez vos informations et votre mot de passe.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                {achievements.map(a => (
-                  <div key={a.code} className={`p-3 rounded-lg border text-center ${a.unlocked ? 'border-amber-300 bg-amber-50' : 'border-slate-200 bg-slate-50 opacity-60'}`}>
-                    <Trophy className={`w-7 h-7 mx-auto mb-1 ${a.unlocked ? 'text-amber-500' : 'text-slate-400'}`} />
-                    <p className="text-sm font-semibold">{a.name}</p>
-                    <p className="text-xs text-muted-foreground">{a.description}</p>
+              <Tabs defaultValue="infos">
+                <TabsList className="mb-4 grid w-full grid-cols-2">
+                  <TabsTrigger value="infos">Informations</TabsTrigger>
+                  <TabsTrigger value="security">Sécurité</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="infos" className="space-y-4">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="pseudo">Pseudonyme</Label>
+                      <Input
+                        id="pseudo"
+                        value={profile.pseudo}
+                        maxLength={24}
+                        onChange={e => setProfile({ ...profile, pseudo: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="fullname">Nom complet</Label>
+                      <Input
+                        id="fullname"
+                        value={profile.fullName}
+                        onChange={e => setProfile({ ...profile, fullName: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="country">Pays</Label>
+                      <Select
+                        value={profile.country}
+                        onValueChange={v => setProfile({ ...profile, country: v })}
+                      >
+                        <SelectTrigger id="country">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          {COUNTRIES.map(c => (
+                            <SelectItem key={c} value={c}>
+                              {c}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Téléphone</Label>
+                      <Input
+                        id="phone"
+                        value={profile.phone}
+                        placeholder="Facultatif"
+                        onChange={e => setProfile({ ...profile, phone: e.target.value })}
+                      />
+                    </div>
                   </div>
-                ))}
-              </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="avatar">URL de l&apos;avatar</Label>
+                    <Input
+                      id="avatar"
+                      value={profile.avatarUrl}
+                      placeholder="https://exemple.fr/photo.jpg"
+                      onChange={e => setProfile({ ...profile, avatarUrl: e.target.value })}
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Laissez vide pour utiliser les initiales de votre pseudonyme.
+                    </p>
+                  </div>
+
+                  <Button onClick={saveProfile} disabled={saving} className="gap-2">
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Enregistrer les modifications
+                  </Button>
+                </TabsContent>
+
+                <TabsContent value="security" className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="current">Mot de passe actuel</Label>
+                    <Input
+                      id="current"
+                      type="password"
+                      autoComplete="current-password"
+                      value={passwords.currentPassword}
+                      onChange={e =>
+                        setPasswords({ ...passwords, currentPassword: e.target.value })
+                      }
+                    />
+                  </div>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="new">Nouveau mot de passe</Label>
+                      <Input
+                        id="new"
+                        type="password"
+                        autoComplete="new-password"
+                        value={passwords.newPassword}
+                        onChange={e => setPasswords({ ...passwords, newPassword: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="confirm">Confirmation</Label>
+                      <Input
+                        id="confirm"
+                        type="password"
+                        autoComplete="new-password"
+                        value={passwords.confirm}
+                        onChange={e => setPasswords({ ...passwords, confirm: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    8 caractères minimum. Mélangez majuscules, chiffres et symboles.
+                  </p>
+                  <Button
+                    onClick={changePassword}
+                    disabled={saving || !passwords.currentPassword || !passwords.newPassword}
+                    className="gap-2"
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <KeyRound className="h-4 w-4" />
+                    )}
+                    Modifier le mot de passe
+                  </Button>
+
+                  <div className="rounded-xl border p-3 text-xs text-muted-foreground">
+                    <p className="mb-1 font-medium text-foreground">Compte créé le</p>
+                    {user.createdAt
+                      ? new Date(user.createdAt).toLocaleDateString('fr-FR', {
+                          day: '2-digit',
+                          month: 'long',
+                          year: 'numeric',
+                        })
+                      : '—'}
+                  </div>
+                </TabsContent>
+              </Tabs>
             </CardContent>
           </Card>
         </div>
       </div>
-    </div>
-  )
-}
-
-function StatCard({ icon, value, label, color }: { icon: React.ReactNode; value: any; label: string; color: string }) {
-  return (
-    <Card>
-      <CardContent className="p-4 text-center">
-        <div className={`w-10 h-10 rounded-full mx-auto mb-2 flex items-center justify-center ${color}`}>{icon}</div>
-        <p className="text-2xl font-black text-slate-900">{value}</p>
-        <p className="text-xs text-muted-foreground">{label}</p>
-      </CardContent>
-    </Card>
-  )
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between items-center py-2 border-b last:border-b-0">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="font-medium text-sm">{value}</span>
     </div>
   )
 }

@@ -1,52 +1,69 @@
-import { createHash, randomBytes } from 'crypto'
+import { createHmac, timingSafeEqual } from 'crypto'
 
-// Simple password hashing (PBKDF2-like). For production, use bcrypt.
-export function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString('hex')
-  const hash = createHash('sha256').update(salt + password).digest('hex')
-  return `${salt}:${hash}`
+export { hashPassword, verifyPassword, needsRehash } from './password.mjs'
+
+// ---------------------------------------------------------------------------
+// Jetons
+// ---------------------------------------------------------------------------
+// Implémentation minimale d'un JWT HS256. La signature est un vrai HMAC-SHA256 :
+// une simple empreinte `sha256(données + secret)` serait vulnérable aux attaques
+// par extension de longueur.
+
+const SECRET = process.env.JWT_SECRET || 'qvgdm-secret-de-developpement-a-changer'
+
+if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
+  console.warn(
+    "[auth] JWT_SECRET absent : un secret de développement est utilisé. " +
+      "Définissez JWT_SECRET dans les variables d'environnement."
+  )
 }
 
-export function verifyPassword(password: string, stored: string): boolean {
-  const [salt, hash] = stored.split(':')
-  if (!salt || !hash) return false
-  const computed = createHash('sha256').update(salt + password).digest('hex')
-  return computed === hash
-}
+export const TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
 
-// Minimal JWT implementation (HS256). For production, use a library like jose.
-const SECRET = process.env.JWT_SECRET || 'qvgdm-secret-change-me-in-production'
-
-function base64url(input: string | Buffer) {
+function base64url(input: string | Buffer): string {
   const b = Buffer.isBuffer(input) ? input : Buffer.from(input)
-  return b.toString('base64').replace(/=+$/, '').replace(/\+/g, '-').replace(/\//g, '_')
+  return b.toString('base64url')
 }
 
 function base64urlDecode(input: string): Buffer {
-  const pad = input.length % 4 === 0 ? '' : '='.repeat(4 - (input.length % 4))
-  return Buffer.from(input.replace(/-/g, '+').replace(/_/g, '/') + pad, 'base64')
+  return Buffer.from(input, 'base64url')
 }
 
-export function signToken(payload: Record<string, any>, expiresInSec = 60 * 60 * 24 * 7): string {
+function sign(data: string): string {
+  return createHmac('sha256', SECRET).update(data).digest('base64url')
+}
+
+export interface TokenPayload {
+  sub: string
+  role: string
+  iat: number
+  exp: number
+  [key: string]: unknown
+}
+
+export function signToken(
+  payload: Record<string, unknown>,
+  expiresInSec = TOKEN_TTL_SECONDS
+): string {
   const header = { alg: 'HS256', typ: 'JWT' }
   const iat = Math.floor(Date.now() / 1000)
   const body = { ...payload, iat, exp: iat + expiresInSec }
-  const headerB64 = base64url(JSON.stringify(header))
-  const bodyB64 = base64url(JSON.stringify(body))
-  const data = `${headerB64}.${bodyB64}`
-  const sig = createHash('sha256').update(data + SECRET).digest('hex')
-  return `${data}.${sig}`
+  const data = `${base64url(JSON.stringify(header))}.${base64url(JSON.stringify(body))}`
+  return `${data}.${sign(data)}`
 }
 
-export function verifyToken(token: string): Record<string, any> | null {
+export function verifyToken(token: string): TokenPayload | null {
   try {
     const parts = token.split('.')
     if (parts.length !== 3) return null
-    const [headerB64, bodyB64, sig] = parts
-    const data = `${headerB64}.${bodyB64}`
-    const expected = createHash('sha256').update(data + SECRET).digest('hex')
-    if (sig !== expected) return null
-    const body = JSON.parse(base64urlDecode(bodyB64).toString())
+    const [headerB64, bodyB64, signature] = parts
+    const expected = sign(`${headerB64}.${bodyB64}`)
+    // Comparaison à temps constant ; timingSafeEqual exige des longueurs égales.
+    if (signature.length !== expected.length) return null
+    if (!timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null
+
+    const body = JSON.parse(base64urlDecode(bodyB64).toString()) as TokenPayload
+    if (!body.sub) return null
     if (body.exp && body.exp < Math.floor(Date.now() / 1000)) return null
     return body
   } catch {
@@ -54,16 +71,29 @@ export function verifyToken(token: string): Record<string, any> | null {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Extraction depuis la requête
+// ---------------------------------------------------------------------------
+
 export function getTokenFromRequest(req: Request): string | null {
   const auth = req.headers.get('authorization')
-  if (auth?.startsWith('Bearer ')) return auth.slice(7)
+  if (auth?.startsWith('Bearer ')) return auth.slice(7).trim()
   return null
 }
 
-export function getUserFromRequest(req: Request): { userId: string; role: string } | null {
+export interface AuthContext {
+  userId: string
+  role: string
+}
+
+export function getUserFromRequest(req: Request): AuthContext | null {
   const token = getTokenFromRequest(req)
   if (!token) return null
   const body = verifyToken(token)
-  if (!body || !body.sub) return null
-  return { userId: body.sub as string, role: (body.role as string) || 'USER' }
+  if (!body) return null
+  return { userId: body.sub, role: body.role || 'USER' }
+}
+
+export function isAdmin(auth: AuthContext | null): boolean {
+  return auth?.role === 'ADMIN'
 }
