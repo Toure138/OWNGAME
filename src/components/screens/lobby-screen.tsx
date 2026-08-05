@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useApp, type OnlinePlayer } from '@/lib/store'
-import { sendInvite, cancelInvite, eventBus } from '@/hooks/use-realtime'
+import { sendInvite, cancelInvite, startSoloGame, eventBus } from '@/hooks/use-realtime'
+import { BOT_PROFILES, DEFAULT_BOT } from '@/lib/bot'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -14,8 +15,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import { useToast } from '@/hooks/use-toast'
 import { GamePrepareModal } from '@/components/game/game-prepare-modal'
+import { cn } from '@/lib/utils'
 import {
   Users, Search, Zap, Swords, Loader2, X, Trophy, Flame, Target, Layers, Shuffle,
+  Bot, GraduationCap, ArrowRight,
 } from 'lucide-react'
 
 interface Category {
@@ -23,6 +26,16 @@ interface Category {
   name: string
   color?: string | null
   questionCount: number
+}
+
+/** Titre porté par le détenteur de chaque diplôme, pour l'aperçu du salon. */
+const DEGREE_LABELS: Record<string, string> = {
+  CEP: 'Titulaire du CEP',
+  BEPC: 'Breveté',
+  BAC: 'Bachelier',
+  LICENCE: 'Licencié',
+  MASTER: 'Titulaire d’un master',
+  DOCTORAT: 'Docteur',
 }
 
 type PrepareData = {
@@ -39,6 +52,7 @@ export function LobbyScreen() {
   const connected = useApp(s => s.connected)
   const categoryFilter = useApp(s => s.categoryFilter)
   const setCategoryFilter = useApp(s => s.setCategoryFilter)
+  const setView = useApp(s => s.setView)
   const pendingInvite = useApp(s => s.pendingInvite)
   const setPendingInvite = useApp(s => s.setPendingInvite)
   const { toast } = useToast()
@@ -50,6 +64,8 @@ export function LobbyScreen() {
   const [matchmaking, setMatchmaking] = useState(false)
   const [prepare, setPrepare] = useState<PrepareData | null>(null)
   const [waitingOpponent, setWaitingOpponent] = useState<string | null>(null)
+  const [botProfile, setBotProfile] = useState<string>(DEFAULT_BOT)
+  const [launchingSolo, setLaunchingSolo] = useState(false)
 
   useEffect(() => {
     fetch('/api/categories')
@@ -139,14 +155,32 @@ export function LobbyScreen() {
     setPendingInvite(null)
   }
 
-  async function autoMatch() {
-    const candidates = onlinePlayers.filter(p => p.status === 'AVAILABLE')
-    if (!candidates.length) {
+  async function playSolo() {
+    setLaunchingSolo(true)
+    const result = await startSoloGame(token, botProfile, categoryFilter)
+    setLaunchingSolo(false)
+    if (!result.ok) {
       toast({
-        title: 'Aucun adversaire disponible',
-        description: 'Ouvrez l’application dans un autre onglet avec un second compte pour tester.',
+        title: 'Partie impossible',
+        description: result.error,
         variant: 'destructive',
       })
+    }
+    // La bascule vers le plateau est déclenchée par l'événement `game:started`.
+  }
+
+  async function autoMatch() {
+    const candidates = onlinePlayers.filter(p => p.status === 'AVAILABLE')
+    // Personne en ligne n'est pas un échec : c'est le cas le plus fréquent.
+    // Plutôt qu'un message d'erreur, on lance la partie contre l'ordinateur.
+    if (!candidates.length) {
+      toast({
+        title: 'Aucun joueur disponible',
+        description: `Lancement d’un duel contre l’ordinateur (${
+          BOT_PROFILES.find(p => p.code === botProfile)?.name ?? ''
+        }).`,
+      })
+      await playSolo()
       return
     }
     setMatchmaking(true)
@@ -267,6 +301,104 @@ export function LobbyScreen() {
         </CardContent>
       </Card>
 
+      {/* Jouer sans attendre : contre l'ordinateur, ou en examen. */}
+      <div className="mb-4 grid gap-3 md:grid-cols-2">
+        <Card className={cn(availableCount === 0 && 'border-primary/50 shadow-sm')}>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-500/12 text-sky-600 dark:text-sky-400">
+                <Bot className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Jouer contre l’ordinateur</CardTitle>
+                <CardDescription>
+                  {availableCount === 0
+                    ? 'Personne en ligne — l’ordinateur prend le relais.'
+                    : 'Disponible à tout moment, sans attendre d’adversaire.'}
+                </CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ToggleGroup
+              type="single"
+              value={botProfile}
+              onValueChange={v => v && setBotProfile(v)}
+              variant="outline"
+              size="sm"
+              className="flex-wrap justify-start"
+            >
+              {BOT_PROFILES.map(p => (
+                <ToggleGroupItem key={p.code} value={p.code} className="text-xs">
+                  {p.name}
+                </ToggleGroupItem>
+              ))}
+            </ToggleGroup>
+            <p className="min-h-8 text-xs text-muted-foreground">
+              {BOT_PROFILES.find(p => p.code === botProfile)?.description}
+            </p>
+            <Button
+              onClick={playSolo}
+              disabled={launchingSolo || !connected}
+              className="w-full gap-2"
+            >
+              {launchingSolo ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Lancement…
+                </>
+              ) : (
+                <>
+                  <Swords className="h-4 w-4" /> Lancer la partie
+                </>
+              )}
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              Les parties solo font progresser votre niveau, mais ne comptent pas au
+              classement — l’ordinateur est disponible sans limite.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-violet-500/12 text-violet-600 dark:text-violet-400">
+                <GraduationCap className="h-5 w-5" />
+              </div>
+              <div>
+                <CardTitle className="text-base">Parcours académique</CardTitle>
+                <CardDescription>Du CEP au doctorat, un examen par palier.</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-1.5">
+              {['CEP', 'BEPC', 'Bac', 'Licence', 'Master', 'Doctorat'].map(label => (
+                <Badge key={label} variant="outline" className="text-[10px]">
+                  {label}
+                </Badge>
+              ))}
+            </div>
+            <p className="min-h-8 text-xs text-muted-foreground">
+              Les questions sont classées du niveau primaire au niveau doctorat. Décrochez
+              chaque diplôme pour ouvrir le suivant — avec mention, si vous visez juste.
+            </p>
+            <Button
+              variant="secondary"
+              onClick={() => setView('academy')}
+              className="w-full gap-2"
+            >
+              <ArrowRight className="h-4 w-4" />
+              {user.highestDegree ? 'Poursuivre le cursus' : 'Commencer par le CEP'}
+            </Button>
+            <p className="text-[11px] text-muted-foreground">
+              Votre titre actuel :{' '}
+              <strong>{user.highestDegree ? DEGREE_LABELS[user.highestDegree] : 'Candidat libre'}</strong>
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
       {pendingInvite && (
         <Card className="animate-in-up mb-4 border-primary/40 bg-primary/5">
           <CardContent className="flex items-center justify-between gap-3 p-4">
@@ -345,7 +477,7 @@ export function LobbyScreen() {
               }
               description={
                 onlinePlayers.length === 0
-                  ? 'Ouvrez l’application dans une fenêtre de navigation privée avec le compte player@demo.fr pour tester un duel.'
+                  ? 'Aucun autre joueur connecté pour le moment : affrontez l’ordinateur, ou passez un examen du parcours académique.'
                   : 'Modifiez le filtre ou effacez la recherche.'
               }
               action={
@@ -360,7 +492,16 @@ export function LobbyScreen() {
                   >
                     Réinitialiser les filtres
                   </Button>
-                ) : undefined
+                ) : (
+                  <div className="flex flex-wrap justify-center gap-2">
+                    <Button size="sm" onClick={playSolo} disabled={launchingSolo || !connected}>
+                      <Bot className="mr-1.5 h-4 w-4" /> Jouer contre l’ordinateur
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => setView('academy')}>
+                      <GraduationCap className="mr-1.5 h-4 w-4" /> Parcours académique
+                    </Button>
+                  </div>
+                )
               }
             />
           ) : (

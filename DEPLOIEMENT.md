@@ -19,8 +19,9 @@ git push -u origin main
 1. Connectez-vous sur [dashboard.render.com](https://dashboard.render.com).
 2. **New → Blueprint**.
 3. Sélectionnez le dépôt GitHub que vous venez de pousser.
-4. Render détecte [`render.yaml`](./render.yaml) et propose le service
-   `qvgdm-quiz`. Validez avec **Apply**.
+4. Render détecte [`render.yaml`](./render.yaml) et propose **deux ressources** :
+   le service web `qvgdm-quiz` et la base PostgreSQL `qvgdm-db`. Validez avec
+   **Apply** — les deux doivent être créées, le service seul ne démarrerait pas.
 
 Render exécute alors :
 
@@ -30,8 +31,10 @@ Render exécute alors :
 | Démarrage  | `npm run db:prepare && npm run start:prod`    |
 | Santé      | `GET /api/health`                             |
 
-Le premier déploiement prend environ 3 à 5 minutes. Au démarrage,
-`db:prepare` crée la base, applique le schéma et insère les 1000 questions.
+Le premier déploiement prend environ 3 à 5 minutes. Au démarrage, `db:prepare`
+attend que PostgreSQL réponde, crée les tables et insère les 1000 questions.
+Aux démarrages suivants il ne fait rien : les données déjà en base sont
+conservées.
 
 ## 3. Variables d'environnement
 
@@ -44,7 +47,7 @@ Le premier déploiement prend environ 3 à 5 minutes. Au démarrage,
 | `ADMIN_EMAIL`     | Identifiant du compte administrateur créé au démarrage           |
 | `ADMIN_PASSWORD`  | Son mot de passe — **choisissez-en un solide**                   |
 | `JWT_SECRET`      | Généré automatiquement par Render, ne rien saisir                |
-| `DATABASE_URL`    | Chemin du fichier SQLite (voir la section suivante)              |
+| `DATABASE_URL`    | Connexion PostgreSQL, renseignée par Render (`fromDatabase`)     |
 | `HOSTNAME`        | `0.0.0.0` — **ne pas retirer**, voir ci-dessous                  |
 | `SEED_DEMO_USERS` | `true` pour ajouter 15 joueurs de démonstration                  |
 
@@ -69,27 +72,49 @@ immédiatement après le premier déploiement** depuis l'écran Profil → Sécu
 
 ## 4. Persistance des données
 
-Le plan gratuit de Render **ne conserve pas le système de fichiers** : à chaque
-déploiement ou redémarrage (dont la mise en veille après 15 minutes
-d'inactivité), le disque repart de zéro.
+Les données vivent dans la base PostgreSQL `qvgdm-db`, un service **distinct**
+de l'instance web. Comptes, parties, classements, notifications et succès
+survivent donc aux redéploiements, aux redémarrages et aux réveils après mise en
+veille — le système de fichiers éphémère de l'instance n'entre plus en jeu.
 
-Concrètement :
+C'était le défaut de la version précédente : la base était un fichier SQLite posé
+sur ce disque éphémère, recréé vide à chaque redémarrage.
 
-- la banque de 1000 questions et le compte administrateur sont **recréés
-  automatiquement** au démarrage — l'application est toujours immédiatement
-  jouable ;
-- les comptes créés par les joueurs, leurs parties et leurs classements sont
-  **perdus**.
+**Point de vigilance — le plan gratuit de la base est temporaire.** Render
+supprime les bases PostgreSQL gratuites au bout de 30 jours ; la date
+d'expiration est affichée sur la page de la base dans le tableau de bord. Trois
+options :
 
-C'est acceptable pour une démonstration. Pour conserver les données :
+1. **Payer la base** : passez `plan: free` à `plan: basic-256mb` (ou supérieur)
+   dans le bloc `databases` de `render.yaml`, puis redéployez ;
+2. **Héberger la base ailleurs** (Neon, Supabase, ElephantSQL… tous proposent
+   une offre gratuite durable) : supprimez le bloc `databases` de `render.yaml`,
+   remplacez le `fromDatabase` de `DATABASE_URL` par `sync: false`, et collez la
+   chaîne de connexion dans le tableau de bord Render. Ajoutez
+   `?sslmode=require` si le fournisseur l'exige ;
+3. **Ne rien faire** et recréer une base gratuite tous les 30 jours — les
+   données sont alors perdues à chaque renouvellement.
 
-1. Passez le service en plan **Starter** (7 $/mois) ;
-2. décommentez la section `disk` à la fin de `render.yaml` ;
-3. remplacez la valeur de `DATABASE_URL` par `file:/var/data/qvgdm.db` ;
-4. redéployez.
+### Sauvegarde et restauration
 
-Le fichier SQLite vit alors sur le disque monté et survit aux redéploiements.
-`db:prepare` reste idempotent : il n'écrase jamais une base existante.
+Render fournit la chaîne de connexion externe (`External Database URL`) sur la
+page de la base :
+
+```bash
+pg_dump "<External Database URL>" > sauvegarde.sql
+psql "<External Database URL>" < sauvegarde.sql
+```
+
+### Reprise d'une ancienne base SQLite
+
+Si vous aviez déjà un fichier `db/custom.db` rempli, ses données se reprennent
+depuis votre poste, la chaîne de connexion externe pointée sur la base Render :
+
+```bash
+DATABASE_URL="<External Database URL>" npm run db:import-sqlite
+```
+
+L'opération n'écrase rien et peut être relancée sans risque.
 
 ## 5. Vérifier le déploiement
 
@@ -100,9 +125,9 @@ curl https://<votre-service>.onrender.com/api/health
 node scripts/check-endpoints.mjs https://<votre-service>.onrender.com
 ```
 
-Le second script exécute les 109 vérifications, dont un duel complet entre deux
-comptes de test qu'il crée puis supprime. Il a besoin des identifiants
-administrateur :
+Le second script exécute les 160 vérifications : un duel complet entre deux
+comptes de test qu'il crée puis supprime, une partie contre l'ordinateur et un
+examen du parcours académique. Il a besoin des identifiants administrateur :
 
 ```bash
 ADMIN_EMAIL=... ADMIN_PASSWORD=... node scripts/check-endpoints.mjs https://<votre-service>.onrender.com

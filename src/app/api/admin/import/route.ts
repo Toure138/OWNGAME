@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { DEGREE_CODES, levelForSingleQuestion } from '@/lib/academic.mjs'
 import { guarded, requireAdmin, parseBody, ok, fail } from '@/lib/api'
 
 export const runtime = 'nodejs'
@@ -15,6 +16,7 @@ const questionSchema = z.object({
   correctAnswer: z.enum(['A', 'B', 'C', 'D']),
   explanation: z.string().trim().max(500).nullable().optional(),
   difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).optional(),
+  academicLevel: z.enum(DEGREE_CODES as [string, ...string[]]).optional(),
 })
 
 const schema = z.object({
@@ -68,6 +70,9 @@ export const POST = guarded(async (req: NextRequest) => {
         correctAnswer: q.correctAnswer,
         explanation: q.explanation || null,
         difficulty: q.difficulty || 'MEDIUM',
+        // Un import sans palier déclaré est réparti automatiquement : sans
+        // niveau, ces questions ne seraient tirées par aucun examen.
+        academicLevel: q.academicLevel || levelForSingleQuestion(q),
         categoryId,
       })),
     })

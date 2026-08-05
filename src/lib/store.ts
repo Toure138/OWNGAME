@@ -7,6 +7,7 @@ export type View =
   | 'auth'
   | 'lobby'
   | 'game'
+  | 'academy'
   | 'profile'
   | 'leaderboard'
   | 'history'
@@ -32,6 +33,10 @@ export interface User {
   draws?: number
   totalScore: number
   bestStreak?: number
+  /** Plus haut diplôme du parcours académique : CEP … DOCTORAT, ou null. */
+  highestDegree?: string | null
+  examsPassed?: number
+  soloGames?: number
   rank?: number
   nationalRank?: number
   createdAt?: string

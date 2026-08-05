@@ -19,12 +19,15 @@ export const GET = guarded(async (req: NextRequest) => {
   const users = await db.user.findMany({
     where: {
       ...(role && ['USER', 'ADMIN'].includes(role) ? { role } : {}),
+      // `mode: 'insensitive'` est indispensable sous PostgreSQL : contrairement
+      // à SQLite, son opérateur LIKE respecte la casse. Sans lui, chercher
+      // « alice » ne trouverait pas « Alice ».
       ...(search
         ? {
             OR: [
-              { pseudo: { contains: search } },
-              { email: { contains: search } },
-              { fullName: { contains: search } },
+              { pseudo: { contains: search, mode: 'insensitive' as const } },
+              { email: { contains: search, mode: 'insensitive' as const } },
+              { fullName: { contains: search, mode: 'insensitive' as const } },
             ],
           }
         : {}),

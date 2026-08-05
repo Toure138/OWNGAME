@@ -1,9 +1,33 @@
 import { NextRequest } from 'next/server'
 import { db } from '@/lib/db'
+import { getBotProfile } from '@/lib/bot'
+import { getDegree } from '@/lib/academic.mjs'
 import { guarded, requireAuth, ok } from '@/lib/api'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+
+/** Adversaire d'affichage pour les parties sans second compte. */
+function virtualOpponent(mode: string, botProfile: string | null, examLevel: string | null) {
+  if (mode === 'EXAM') {
+    const degree = getDegree(examLevel)
+    return {
+      id: `jury:${examLevel}`,
+      pseudo: degree ? `Jury — ${degree.name}` : 'Jury',
+      avatarUrl: null,
+      country: degree?.school ?? 'Examen',
+      level: 0,
+    }
+  }
+  const profile = getBotProfile(botProfile)
+  return {
+    id: `bot:${profile.code}`,
+    pseudo: `Ordinateur — ${profile.name}`,
+    avatarUrl: null,
+    country: 'Machine',
+    level: profile.level,
+  }
+}
 
 // GET /api/games/history?outcome=WIN|LOSS|DRAW&limit=…
 export const GET = guarded(async (req: NextRequest) => {
@@ -25,19 +49,39 @@ export const GET = guarded(async (req: NextRequest) => {
 
   const mapped = games.map(g => {
     const isPlayerA = g.playerAId === auth.userId
-    const opponent = isPlayerA ? g.playerB : g.playerA
-    // Chaque joueur traite la moitié des questions de la partie.
-    const myQuestions = Math.round(g.totalQuestions / 2)
+    // `playerB` est nul en solo et en examen : l'adversaire est alors décrit
+    // par le mode de jeu, pas par un compte.
+    const opponent =
+      (isPlayerA ? g.playerB : g.playerA) ??
+      virtualOpponent(g.mode, g.botProfile, g.examLevel)
+    // En examen le candidat traite toutes les questions ; en duel et en solo,
+    // chaque camp en traite la moitié.
+    const myQuestions =
+      g.mode === 'EXAM' ? g.totalQuestions : Math.round(g.totalQuestions / 2)
 
     let outcome: 'WIN' | 'LOSS' | 'DRAW' = 'DRAW'
-    if (g.winnerId === auth.userId) outcome = 'WIN'
-    else if (g.winnerId) outcome = 'LOSS'
+    if (g.mode === 'EXAM') {
+      outcome = g.passed ? 'WIN' : 'LOSS'
+    } else if (g.winnerId === auth.userId) {
+      outcome = 'WIN'
+    } else if (g.winnerId) {
+      outcome = 'LOSS'
+    } else if (g.mode === 'SOLO') {
+      // L'ordinateur n'a pas d'identifiant : sa victoire se lit aux scores.
+      if (g.scoreB > g.scoreA) outcome = 'LOSS'
+      else if (g.scoreA > g.scoreB) outcome = 'WIN'
+    }
 
     return {
       id: g.id,
       date: g.createdAt,
       finishedAt: g.finishedAt,
       status: g.status,
+      mode: g.mode,
+      botProfile: g.botProfile,
+      examLevel: g.examLevel,
+      passed: g.passed,
+      mention: g.mention,
       outcome,
       forfeit: g.forfeit,
       categoryFilter: g.categoryFilter,

@@ -18,7 +18,8 @@ node_modules
 /out/
 /build
 
-# Base de données SQLite locale (recréée par `npm run db:prepare`)
+# Ancienne base SQLite locale, conservée le temps de la reprise des données
+# (`npm run db:import-sqlite`). La base vit désormais dans PostgreSQL.
 /db/
 *.db
 *.db-journal

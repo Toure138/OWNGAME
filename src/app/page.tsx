@@ -12,11 +12,13 @@ import { HistoryScreen } from '@/components/screens/history-screen'
 import { NotificationsScreen } from '@/components/screens/notifications-screen'
 import { AchievementsScreen } from '@/components/screens/achievements-screen'
 import { AdminScreen } from '@/components/screens/admin-screen'
+import { AcademyScreen } from '@/components/screens/academy-screen'
 import { Trophy } from 'lucide-react'
 
 const SCREENS = {
   lobby: LobbyScreen,
   game: GameScreen,
+  academy: AcademyScreen,
   profile: ProfileScreen,
   leaderboard: LeaderboardScreen,
   history: HistoryScreen,

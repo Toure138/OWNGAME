@@ -22,7 +22,9 @@ export const GET = guarded(async (req: NextRequest) => {
     where: {
       ...(categoryId ? { categoryId } : {}),
       ...(difficulty && ['EASY', 'MEDIUM', 'HARD'].includes(difficulty) ? { difficulty } : {}),
-      ...(search ? { text: { contains: search } } : {}),
+      // PostgreSQL respecte la casse dans LIKE : sans `mode: 'insensitive'`,
+      // la recherche ne trouverait que les énoncés écrits exactement ainsi.
+      ...(search ? { text: { contains: search, mode: 'insensitive' as const } } : {}),
     },
     include: { category: { select: { id: true, name: true, color: true } } },
     orderBy: { createdAt: 'desc' },

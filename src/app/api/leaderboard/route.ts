@@ -21,6 +21,8 @@ interface Entry {
   avatarUrl: string | null
   country: string
   level: number
+  /** Plus haut diplôme du parcours académique, affiché à côté du pseudo. */
+  highestDegree: string | null
   totalScore: number
   wins: number
   losses: number
@@ -55,10 +57,18 @@ export const GET = route(async (req: NextRequest) => {
     // Classement de période : on agrège les scores des parties terminées.
     const since = new Date(Date.now() - periodDays * 24 * 60 * 60 * 1000)
     const games = await db.game.findMany({
-      where: { finishedAt: { gte: since } },
+      // Seuls les duels entre joueurs alimentent le classement. Les parties
+      // contre l'ordinateur et les examens relèvent de la progression
+      // personnelle : les y compter reviendrait à classer premier celui qui
+      // enchaîne les adversaires artificiels les plus faibles.
+      where: { finishedAt: { gte: since }, mode: 'DUEL' },
       include: {
-        playerA: { select: { id: true, pseudo: true, avatarUrl: true, country: true, level: true } },
-        playerB: { select: { id: true, pseudo: true, avatarUrl: true, country: true, level: true } },
+        playerA: {
+          select: { id: true, pseudo: true, avatarUrl: true, country: true, level: true, highestDegree: true },
+        },
+        playerB: {
+          select: { id: true, pseudo: true, avatarUrl: true, country: true, level: true, highestDegree: true },
+        },
       },
     })
 
@@ -69,6 +79,9 @@ export const GET = route(async (req: NextRequest) => {
         { user: g.playerB, score: g.scoreB, won: g.winnerId === g.playerBId },
       ]
       for (const side of sides) {
+        // `playerB` est nul hors duel ; la clause `mode` ci-dessus l'écarte
+        // déjà, ce test garde la propriété vraie si elle venait à changer.
+        if (!side.user) continue
         if (countryFilter && side.user.country !== countryFilter) continue
         const current =
           map.get(side.user.id) ??
@@ -78,6 +91,7 @@ export const GET = route(async (req: NextRequest) => {
             avatarUrl: side.user.avatarUrl,
             country: side.user.country,
             level: side.user.level,
+            highestDegree: side.user.highestDegree,
             totalScore: 0,
             wins: 0,
             losses: 0,
@@ -118,6 +132,7 @@ export const GET = route(async (req: NextRequest) => {
       avatarUrl: u.avatarUrl,
       country: u.country,
       level: u.level,
+      highestDegree: u.highestDegree,
       totalScore: u.totalScore,
       wins: u.wins,
       losses: u.losses,

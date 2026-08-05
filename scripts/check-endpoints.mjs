@@ -5,8 +5,9 @@
 // (URL par défaut : http://localhost:3000)
 //
 // Il couvre les codes de succès, les refus d'authentification, les contrôles
-// d'autorisation, la validation des entrées et un duel complet entre deux
-// joueurs, jusqu'à l'enregistrement de la partie en base.
+// d'autorisation, la validation des entrées, un duel complet entre deux joueurs
+// jusqu'à l'enregistrement de la partie en base, une partie contre l'ordinateur
+// et un examen du parcours académique.
 
 const BASE = (process.argv[2] || process.env.BASE_URL || 'http://localhost:3000').replace(/\/$/, '')
 
@@ -668,6 +669,186 @@ async function main() {
       (notifsA.data.notifications || []).some(n => n.type === 'GAME_WON'),
       'une notification de victoire est créée',
       'aucune notification GAME_WON'
+    )
+  }
+
+  // ------------------------------------------------- Solo contre l'ordinateur
+  section('Partie contre l’ordinateur')
+
+  await check('profil d’ordinateur inconnu refusé', 'POST', '/api/realtime/solo-start', {
+    token: tokenA,
+    body: { botProfile: 'TERMINATOR', categoryFilter: null },
+    expect: 400,
+  })
+  await check('lancement sans jeton refusé', 'POST', '/api/realtime/solo-start', {
+    body: { botProfile: 'NOVICE', categoryFilter: null },
+    expect: 401,
+  })
+
+  const solo = await check('A lance un duel contre l’ordinateur', 'POST', '/api/realtime/solo-start', {
+    token: tokenA,
+    body: { botProfile: 'NOVICE', categoryFilter: null },
+  })
+
+  if (solo.ok) {
+    const started = await waitForEvent(tokenA, 'game:started')
+    const soloGame = started.event?.data?.game
+    record(soloGame?.mode === 'SOLO', 'la partie démarre en mode SOLO', `mode = ${soloGame?.mode}`)
+    record(
+      soloGame?.playerB?.isBot === true,
+      'l’adversaire est identifié comme artificiel',
+      `isBot = ${soloGame?.playerB?.isBot}`
+    )
+    record(
+      soloGame?.playerB?.pseudo?.includes('Ordinateur'),
+      'l’adversaire est nommé « Ordinateur »',
+      `pseudo = ${soloGame?.playerB?.pseudo}`
+    )
+
+    await check('le clavardage est refusé face à l’ordinateur', 'POST', '/api/realtime/game-chat', {
+      token: tokenA,
+      body: { gameId: soloGame?.id, content: 'bonjour' },
+      expect: 409,
+    })
+
+    // L'ordinateur doit répondre de lui-même : on attend le résultat d'une
+    // question qui lui revient, sans qu'aucun client ne l'ait provoquée.
+    let botAnswered = false
+    const deadline = Date.now() + 40_000
+    while (!botAnswered && Date.now() < deadline) {
+      const poll = await call('POST', '/api/realtime/poll', { token: tokenA })
+      for (const evt of poll.data.events || []) {
+        if (evt.type === 'game:question' && evt.data.answeredBy === 'A') {
+          await call('POST', '/api/realtime/game-answer', {
+            token: tokenA,
+            body: { gameId: evt.data.gameId, choice: 'A', responseTime: 1000 },
+          })
+        }
+        if (evt.type === 'game:question-result' && evt.data.answeredBy === 'B') botAnswered = true
+      }
+      await sleep(250)
+    }
+    record(botAnswered, 'l’ordinateur répond de lui-même à son tour', 'aucun résultat côté B')
+
+    await check('abandon de la partie solo', 'POST', '/api/realtime/game-leave', {
+      token: tokenA,
+      body: { gameId: soloGame?.id },
+    })
+
+    const soloHistory = await call('GET', '/api/games/history', { token: tokenA })
+    const soloEntry = (soloHistory.data.games || []).find(g => g.mode === 'SOLO')
+    record(!!soloEntry, 'la partie solo est enregistrée dans l’historique', 'aucune partie SOLO')
+    record(
+      soloEntry?.opponent?.pseudo?.includes('Ordinateur'),
+      'l’historique nomme l’adversaire artificiel',
+      `opponent = ${soloEntry?.opponent?.pseudo}`
+    )
+  }
+
+  // ------------------------------------------------------ Parcours académique
+  section('Parcours académique')
+
+  const progress = await check('état du parcours', 'GET', '/api/academic/progress', { token: tokenA })
+  if (progress.ok) {
+    const steps = progress.data.steps || []
+    record(steps.length === 6, 'les six paliers sont décrits', `${steps.length} paliers`)
+    record(
+      steps[0]?.code === 'CEP' && steps[5]?.code === 'DOCTORAT',
+      'le cursus va du CEP au doctorat',
+      `${steps[0]?.code} … ${steps[5]?.code}`
+    )
+    record(
+      steps[0]?.locked === false && steps[1]?.locked === true,
+      'seul le premier palier est ouvert à un nouveau joueur',
+      `CEP locked=${steps[0]?.locked}, BEPC locked=${steps[1]?.locked}`
+    )
+    record(
+      steps.every(s => s.availableQuestions >= 4),
+      'chaque palier dispose d’assez de questions',
+      steps.map(s => `${s.short}=${s.availableQuestions}`).join(' ')
+    )
+    record(
+      progress.data.title === 'Candidat libre',
+      'un joueur sans diplôme est « Candidat libre »',
+      `titre = ${progress.data.title}`
+    )
+  }
+
+  await check('examen d’un diplôme inconnu refusé', 'POST', '/api/realtime/exam-start', {
+    token: tokenA,
+    body: { degree: 'PRIX_NOBEL' },
+    expect: 400,
+  })
+  await check('doctorat refusé sans les diplômes précédents', 'POST', '/api/realtime/exam-start', {
+    token: tokenA,
+    body: { degree: 'DOCTORAT' },
+    expect: 403,
+  })
+
+  const exam = await check('A se présente au CEP', 'POST', '/api/realtime/exam-start', {
+    token: tokenA,
+    body: { degree: 'CEP' },
+  })
+
+  if (exam.ok) {
+    const started = await waitForEvent(tokenA, 'game:started')
+    const examGame = started.event?.data?.game
+    record(examGame?.mode === 'EXAM', 'la partie démarre en mode EXAM', `mode = ${examGame?.mode}`)
+    record(
+      examGame?.examLevel === 'CEP' && examGame.examPassRate === 60,
+      'le diplôme visé et son seuil accompagnent la partie',
+      `${examGame?.examLevel} / ${examGame?.examPassRate} %`
+    )
+    record(
+      examGame?.totalQuestions === 10,
+      'l’examen du CEP compte dix questions',
+      `${examGame?.totalQuestions} questions`
+    )
+
+    // Toutes les questions reviennent au candidat : on répond au hasard
+    // jusqu'à la délibération, seul le déroulement est vérifié ici.
+    let examSummary = null
+    const deadline = Date.now() + 60_000
+    while (!examSummary && Date.now() < deadline) {
+      const poll = await call('POST', '/api/realtime/poll', { token: tokenA })
+      for (const evt of poll.data.events || []) {
+        if (evt.type === 'game:question') {
+          record(
+            evt.data.answeredBy === 'A',
+            `question ${evt.data.index + 1} adressée au candidat`,
+            `answeredBy = ${evt.data.answeredBy}`
+          )
+          await call('POST', '/api/realtime/game-answer', {
+            token: tokenA,
+            body: { gameId: evt.data.gameId, choice: 'A', responseTime: 900 },
+          })
+        }
+        if (evt.type === 'game:finished') examSummary = evt.data
+      }
+      await sleep(200)
+    }
+
+    record(!!examSummary, 'l’examen se termine par une délibération', 'aucun game:finished')
+    if (examSummary) {
+      record(
+        typeof examSummary.passed === 'boolean',
+        'le verdict est rendu (reçu ou ajourné)',
+        `passed = ${examSummary.passed}`
+      )
+      record(
+        examSummary.examPercent >= 0 && examSummary.examPassRate === 60,
+        'la note et le seuil figurent dans le résultat',
+        `${examSummary.examPercent} % / ${examSummary.examPassRate} %`
+      )
+    }
+
+    const examHistory = await call('GET', '/api/games/history', { token: tokenA })
+    const examEntry = (examHistory.data.games || []).find(g => g.mode === 'EXAM')
+    record(!!examEntry, 'l’examen est enregistré dans l’historique', 'aucune partie EXAM')
+    record(
+      examEntry?.myQuestions === examEntry?.totalQuestions,
+      'toutes les questions de l’examen sont comptées au candidat',
+      `${examEntry?.myQuestions} sur ${examEntry?.totalQuestions}`
     )
   }
 

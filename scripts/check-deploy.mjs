@@ -63,9 +63,20 @@ try {
     )
   }
 
+  // La base n'est plus un fichier créé à la volée : la simulation a besoin d'un
+  // serveur PostgreSQL joignable. On réutilise celui du poste de développement
+  // (`docker compose up -d db`) — `db:prepare` est idempotent, il n'efface rien.
+  const databaseUrl =
+    process.env.DATABASE_URL || 'postgresql://qvgdm:qvgdm@localhost:5432/qvgdm?schema=public'
+  if (databaseUrl.startsWith('file:')) {
+    throw new Error(
+      'DATABASE_URL pointe vers un fichier SQLite ; le projet utilise PostgreSQL (voir .env.example)'
+    )
+  }
+
   const env = {
     NODE_ENV: 'production',
-    DATABASE_URL: `file:${path.join(workdir, 'db', 'simulation.db')}`,
+    DATABASE_URL: databaseUrl,
     JWT_SECRET: 'simulation',
   }
 

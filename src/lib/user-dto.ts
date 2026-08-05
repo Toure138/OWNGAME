@@ -23,6 +23,9 @@ export function publicUser(user: User, extra: { rank?: number | null } = {}) {
     draws: user.draws,
     totalScore: user.totalScore,
     bestStreak: user.bestStreak,
+    highestDegree: user.highestDegree,
+    examsPassed: user.examsPassed,
+    soloGames: user.soloGames,
     createdAt: user.createdAt,
     ...(extra.rank !== undefined ? { rank: extra.rank } : {}),
   }

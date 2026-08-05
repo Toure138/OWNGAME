@@ -265,6 +265,17 @@ export const respondInvite = (token: string, invitationId: string, accept: boole
 export const startGame = (token: string, opponentId: string, categoryFilter: string | null) =>
   send('/api/realtime/game-start', token, { opponentId, categoryFilter })
 
+/** Duel contre l'ordinateur : ni invitation, ni adversaire à attendre. */
+export const startSoloGame = (
+  token: string,
+  botProfile: string,
+  categoryFilter: string | null
+) => send('/api/realtime/solo-start', token, { botProfile, categoryFilter })
+
+/** Présentation à un examen du parcours académique. */
+export const startExam = (token: string, degree: string) =>
+  send('/api/realtime/exam-start', token, { degree })
+
 export const answerQuestion = (
   token: string,
   gameId: string,

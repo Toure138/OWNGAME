@@ -25,6 +25,7 @@ import {
   LogOut,
   Trophy,
   Medal,
+  GraduationCap,
   Volume2,
   VolumeX,
   Wifi,
@@ -64,8 +65,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const navItems: NavItem[] = [
     { id: 'lobby', label: 'Salon', icon: <Home className="h-5 w-5" />, mobile: true },
+    {
+      id: 'academy',
+      label: 'Parcours',
+      icon: <GraduationCap className="h-5 w-5" />,
+      mobile: true,
+    },
     { id: 'leaderboard', label: 'Classement', icon: <Crown className="h-5 w-5" />, mobile: true },
-    { id: 'history', label: 'Historique', icon: <History className="h-5 w-5" />, mobile: true },
+    { id: 'history', label: 'Historique', icon: <History className="h-5 w-5" /> },
     { id: 'achievements', label: 'Succès', icon: <Medal className="h-5 w-5" /> },
     { id: 'notifications', label: 'Notifications', icon: <Bell className="h-5 w-5" />, mobile: true },
     { id: 'profile', label: 'Profil', icon: <UserIcon className="h-5 w-5" />, mobile: true },
@@ -222,7 +229,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <footer className="hidden border-t py-3 md:block">
           <div className="container mx-auto max-w-7xl px-4 text-center text-xs text-muted-foreground">
-            🏆 Qui veut gagner 20 millions ? — 1000 questions, 20 catégories, duels en temps réel
+            🏆 Qui veut gagner 20 millions ? — 1000 questions, 20 catégories, du CEP au doctorat
           </div>
         </footer>
 

@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { db } from '@/lib/db'
+import { DEGREE_CODES, levelForSingleQuestion } from '@/lib/academic.mjs'
 import { guarded, requireAdmin, parseBody, ok, fail } from '@/lib/api'
 
 export const runtime = 'nodejs'
@@ -15,6 +16,9 @@ const baseQuestion = {
   correctAnswer: z.enum(['A', 'B', 'C', 'D']),
   explanation: z.string().trim().max(500).nullable().optional(),
   difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).default('MEDIUM'),
+  // Facultatif à la création : sans valeur, le palier est estimé à partir de
+  // l'énoncé et de la difficulté. L'administrateur peut toujours le corriger.
+  academicLevel: z.enum(DEGREE_CODES as [string, ...string[]]).optional(),
   categoryId: z.string().min(1),
 }
 
@@ -38,6 +42,7 @@ const updateSchema = z
     correctAnswer: baseQuestion.correctAnswer.optional(),
     explanation: baseQuestion.explanation,
     difficulty: z.enum(['EASY', 'MEDIUM', 'HARD']).optional(),
+    academicLevel: z.enum(DEGREE_CODES as [string, ...string[]]).optional(),
     categoryId: z.string().min(1).optional(),
   })
 
@@ -54,7 +59,9 @@ export const GET = guarded(async (req: NextRequest) => {
   const where = {
     ...(categoryId ? { categoryId } : {}),
     ...(difficulty && ['EASY', 'MEDIUM', 'HARD'].includes(difficulty) ? { difficulty } : {}),
-    ...(search ? { text: { contains: search } } : {}),
+    // PostgreSQL respecte la casse dans LIKE : sans `mode: 'insensitive'`,
+    // la recherche ne trouverait que les énoncés écrits exactement ainsi.
+    ...(search ? { text: { contains: search, mode: 'insensitive' as const } } : {}),
   }
 
   const [questions, total] = await Promise.all([
@@ -82,7 +89,13 @@ export const POST = guarded(async (req: NextRequest) => {
   if (duplicate) return fail('Une question avec cet énoncé existe déjà', 409)
 
   const question = await db.question.create({
-    data: { ...body, explanation: body.explanation || null },
+    data: {
+      ...body,
+      explanation: body.explanation || null,
+      // Palier estimé si l'administrateur ne l'a pas choisi : une question sans
+      // niveau ne serait jamais tirée par aucun examen.
+      academicLevel: body.academicLevel || levelForSingleQuestion(body),
+    },
     include: { category: { select: { id: true, name: true, color: true } } },
   })
   return ok({ question }, { status: 201 })

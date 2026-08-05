@@ -39,13 +39,15 @@ services:
       - key: HOSTNAME
         value: 0.0.0.0
 
-      # Base SQLite. Sur le plan gratuit, le disque est réinitialisé à chaque
-      # déploiement ou redémarrage : la base est alors recréée et re-peuplée
-      # automatiquement au lancement. Pour conserver les comptes créés par les
-      # joueurs, décommentez la section `disk` plus bas et remplacez cette
-      # valeur par « file:/var/data/qvgdm.db ».
+      # Chaîne de connexion de la base PostgreSQL déclarée en bas de ce
+      # fichier. Render la renseigne lui-même : ne pas la saisir à la main.
+      # La base est un service distinct de l'instance web, donc les comptes,
+      # les parties et les classements survivent aux redéploiements et aux
+      # réveils après mise en veille.
       - key: DATABASE_URL
-        value: file:/opt/render/project/src/db/qvgdm.db
+        fromDatabase:
+          name: qvgdm-db
+          property: connectionString
 
       # Secret de signature des jetons. `generateValue` demande à Render de
       # produire une valeur aléatoire à la création du service ; elle reste
@@ -66,11 +68,17 @@ services:
       - key: SEED_DEMO_USERS
         value: "false"
 
-    # Disque persistant — nécessite un plan payant (Starter ou supérieur).
-    # Sans lui, les comptes créés par les joueurs disparaissent à chaque
-    # redéploiement ; la banque de questions, elle, est toujours recréée.
-    #
-    # disk:
-    #   name: qvgdm-data
-    #   mountPath: /var/data
-    #   sizeGB: 1
+# Base de données PostgreSQL managée.
+#
+# Attention au plan `free` : Render supprime les bases gratuites au bout de
+# 30 jours (la date d'expiration est affichée dans le tableau de bord). Pour un
+# service destiné à durer, passez `plan` à `basic-256mb` ou supérieur, ou
+# hébergez la base ailleurs (Neon, Supabase) en remplaçant le bloc
+# `fromDatabase` ci-dessus par une valeur `sync: false` que vous saisirez dans
+# le tableau de bord.
+databases:
+  - name: qvgdm-db
+    databaseName: qvgdm
+    user: qvgdm
+    plan: free
+    region: frankfurt # doit être la même région que le service web

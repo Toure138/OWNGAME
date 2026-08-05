@@ -19,12 +19,23 @@ const SCOPES = [
   { id: 'yearly', label: 'Annuel' },
 ] as const
 
+/** Abréviation du diplôme, telle qu'on la porte à côté d'un nom. */
+const DEGREE_SHORT: Record<string, string> = {
+  CEP: 'CEP',
+  BEPC: 'BEPC',
+  BAC: 'Bac',
+  LICENCE: 'Licence',
+  MASTER: 'Master',
+  DOCTORAT: 'Dr',
+}
+
 interface Entry {
   id: string
   pseudo: string
   avatarUrl: string | null
   country: string
   level: number
+  highestDegree: string | null
   totalScore: number
   wins: number
   losses: number
@@ -153,9 +164,14 @@ export function LeaderboardScreen() {
                     </span>
                     <PlayerAvatar name={p.pseudo} src={p.avatarUrl} className="h-9 w-9 text-xs" />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate font-semibold">
-                        {p.pseudo}
-                        {isMe && <span className="ml-1 text-xs font-normal text-primary">(vous)</span>}
+                      <p className="flex items-center gap-1.5 truncate font-semibold">
+                        <span className="truncate">{p.pseudo}</span>
+                        {p.highestDegree && (
+                          <Badge variant="outline" className="shrink-0 text-[10px]">
+                            {DEGREE_SHORT[p.highestDegree] ?? p.highestDegree}
+                          </Badge>
+                        )}
+                        {isMe && <span className="text-xs font-normal text-primary">(vous)</span>}
                       </p>
                       <p className="truncate text-xs text-muted-foreground">
                         {p.country} · Niv. {p.level} · {p.winRate}% de victoires

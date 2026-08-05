@@ -1,0 +1,32 @@
+# PostgreSQL de développement.
+#
+#   docker compose up -d db     démarre la base
+#   docker compose down         l'arrête (les données restent)
+#   docker compose down -v      l'arrête et efface les données
+#
+# Les identifiants correspondent au DATABASE_URL de `.env.example` :
+#   postgresql://qvgdm:qvgdm@localhost:5432/qvgdm?schema=public
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: qvgdm-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: qvgdm
+      POSTGRES_PASSWORD: qvgdm
+      POSTGRES_DB: qvgdm
+    ports:
+      - '5432:5432'
+    volumes:
+      # Volume nommé : les données survivent à `docker compose down` et aux
+      # redémarrages de la machine. C'est tout l'intérêt du passage à Postgres.
+      - qvgdm-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U qvgdm -d qvgdm']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  qvgdm-pgdata:

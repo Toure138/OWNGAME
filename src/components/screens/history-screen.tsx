@@ -10,13 +10,26 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { EmptyState, ErrorState, ListSkeleton, StatsSkeleton } from '@/components/ui/states'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
-  History, Trophy, Target, Clock, Percent, Calendar, Flag, ChevronRight,
+  History, Trophy, Target, Clock, Percent, Calendar, Flag, ChevronRight, Bot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+
+const MENTION_LABELS: Record<string, string> = {
+  EXCELLENT: 'Félicitations du jury',
+  TRES_BIEN: 'Très bien',
+  BIEN: 'Bien',
+  ASSEZ_BIEN: 'Assez bien',
+  PASSABLE: 'Passable',
+}
 
 interface GameRow {
   id: string
   date: string
+  mode: 'DUEL' | 'SOLO' | 'EXAM'
+  botProfile: string | null
+  examLevel: string | null
+  passed: boolean | null
+  mention: string | null
   outcome: 'WIN' | 'LOSS' | 'DRAW'
   forfeit: boolean
   categoryFilter: string | null
@@ -193,13 +206,35 @@ export function HistoryScreen() {
                     />
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-1.5">
-                        <p className="truncate font-semibold">vs {g.opponent.pseudo}</p>
+                        <p className="truncate font-semibold">
+                          {g.mode === 'EXAM' ? g.opponent.pseudo : `vs ${g.opponent.pseudo}`}
+                        </p>
                         <Badge
                           variant={won ? 'default' : lost ? 'destructive' : 'secondary'}
                           className={cn('text-[10px]', won && 'bg-emerald-500 hover:bg-emerald-500')}
                         >
-                          {won ? 'Victoire' : lost ? 'Défaite' : 'Nul'}
+                          {/* Un examen se solde par un verdict, pas par une
+                              victoire : « Défaite » face à un jury n'a pas de sens. */}
+                          {g.mode === 'EXAM'
+                            ? won
+                              ? 'Reçu'
+                              : 'Ajourné'
+                            : won
+                              ? 'Victoire'
+                              : lost
+                                ? 'Défaite'
+                                : 'Nul'}
                         </Badge>
+                        {g.mode === 'SOLO' && (
+                          <Badge variant="outline" className="gap-1 text-[10px]">
+                            <Bot className="h-2.5 w-2.5" /> Solo
+                          </Badge>
+                        )}
+                        {g.mode === 'EXAM' && g.mention && won && (
+                          <Badge variant="outline" className="text-[10px]">
+                            {MENTION_LABELS[g.mention] ?? g.mention}
+                          </Badge>
+                        )}
                         {g.forfeit && (
                           <Badge variant="outline" className="gap-1 text-[10px]">
                             <Flag className="h-2.5 w-2.5" /> Abandon

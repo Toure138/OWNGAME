@@ -565,6 +565,25 @@ function UsersTab({ headers, currentUserId }: { headers: Headers; currentUserId:
 // Questions
 // ---------------------------------------------------------------------------
 
+/** Paliers du cursus, dans l'ordre — miroir de `DEGREES` côté serveur. */
+const ACADEMIC_LEVELS = [
+  { code: 'CEP', label: 'CEP — primaire' },
+  { code: 'BEPC', label: 'BEPC — collège' },
+  { code: 'BAC', label: 'Bac — lycée' },
+  { code: 'LICENCE', label: 'Licence' },
+  { code: 'MASTER', label: 'Master' },
+  { code: 'DOCTORAT', label: 'Doctorat' },
+] as const
+
+const LEVEL_SHORT: Record<string, string> = {
+  CEP: 'CEP',
+  BEPC: 'BEPC',
+  BAC: 'Bac',
+  LICENCE: 'Licence',
+  MASTER: 'Master',
+  DOCTORAT: 'Doctorat',
+}
+
 const EMPTY_QUESTION = {
   text: '',
   propositionA: '',
@@ -574,6 +593,8 @@ const EMPTY_QUESTION = {
   correctAnswer: 'A' as 'A' | 'B' | 'C' | 'D',
   explanation: '',
   difficulty: 'MEDIUM' as 'EASY' | 'MEDIUM' | 'HARD',
+  // Vide : le serveur estime le palier à la création.
+  academicLevel: '',
   categoryId: '',
 }
 
@@ -711,6 +732,11 @@ function QuestionsTab({ headers }: { headers: Headers }) {
                     <Badge variant="secondary" className="text-[10px]">
                       {{ EASY: 'Facile', MEDIUM: 'Moyen', HARD: 'Difficile' }[q.difficulty as string]}
                     </Badge>
+                    {q.academicLevel && (
+                      <Badge variant="outline" className="text-[10px]">
+                        {LEVEL_SHORT[q.academicLevel as string] ?? q.academicLevel}
+                      </Badge>
+                    )}
                     {q.timesAnswered > 0 && (
                       <Badge variant="outline" className="text-[10px]">
                         {Math.round((q.timesCorrect / q.timesAnswered) * 100)} % de réussite
@@ -821,6 +847,9 @@ function QuestionDialog({
         correctAnswer: form.correctAnswer,
         explanation: form.explanation || null,
         difficulty: form.difficulty,
+        // Omis quand l'administrateur laisse « Automatique » : le serveur
+        // estime alors le palier lui-même.
+        ...(form.academicLevel ? { academicLevel: form.academicLevel } : {}),
         categoryId: form.categoryId,
       }
       const res = await fetch(
@@ -915,6 +944,29 @@ function QuestionDialog({
                   <SelectItem value="EASY">Facile</SelectItem>
                   <SelectItem value="MEDIUM">Moyen</SelectItem>
                   <SelectItem value="HARD">Difficile</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Palier du cursus</Label>
+              <Select
+                value={form.academicLevel || 'AUTO'}
+                onValueChange={v =>
+                  setForm({ ...form, academicLevel: v === 'AUTO' ? '' : v })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {/* « Automatique » laisse le serveur estimer le palier à
+                      partir de l'énoncé et de la difficulté. */}
+                  <SelectItem value="AUTO">Automatique</SelectItem>
+                  {ACADEMIC_LEVELS.map(l => (
+                    <SelectItem key={l.code} value={l.code}>
+                      {l.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>

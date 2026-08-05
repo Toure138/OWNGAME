@@ -11,7 +11,8 @@
 //   SEED_DEMO_USERS=true          équivalent de --demo
 
 import { PrismaClient } from '@prisma/client'
-import { CATEGORIES, toQuestion } from '../data/index.mjs'
+import { CATEGORIES, toQuestion, getAllQuestions } from '../data/index.mjs'
+import { assignAcademicLevels } from '../data/levels.mjs'
 import { hashPassword } from '../src/lib/password.mjs'
 
 const db = new PrismaClient()
@@ -67,7 +68,7 @@ async function seedCategories() {
   return byName
 }
 
-async function seedQuestions(categoriesByName) {
+async function seedQuestions(categoriesByName, levels) {
   const existing = new Set(
     (await db.question.findMany({ select: { text: true } })).map(q => q.text)
   )
@@ -88,12 +89,14 @@ async function seedQuestions(categoriesByName) {
         correctAnswer: q.correctAnswer,
         explanation: q.explanation,
         difficulty: q.difficulty,
+        academicLevel: levels.get(q.text) || 'BAC',
         categoryId: category.id,
       })
     }
   }
 
-  // SQLite limite le nombre de paramètres par requête : on insère par lots.
+  // PostgreSQL plafonne à 65535 le nombre de paramètres d'une requête, et
+  // chaque question en compte neuf : on insère par lots.
   const BATCH = 200
   let created = 0
   for (let i = 0; i < toCreate.length; i += BATCH) {
@@ -102,6 +105,42 @@ async function seedQuestions(categoriesByName) {
     created += res.count
   }
   return created
+}
+
+/**
+ * Affecte leur palier aux questions déjà en base.
+ *
+ * Ne s'exécute qu'une fois : dès qu'au moins deux paliers coexistent, la
+ * colonne a été calculée — ou ajustée à la main depuis l'administration — et
+ * l'écraser reviendrait à défaire ce travail à chaque redémarrage du service.
+ */
+async function backfillAcademicLevels(levels) {
+  const distinct = await db.question.findMany({
+    distinct: ['academicLevel'],
+    select: { academicLevel: true },
+  })
+  if (distinct.length > 1) return { skipped: true, updated: 0 }
+
+  // Un seul appel par palier plutôt qu'un par question : six requêtes au lieu
+  // de mille.
+  const byLevel = new Map()
+  for (const [text, level] of levels) {
+    if (!byLevel.has(level)) byLevel.set(level, [])
+    byLevel.get(level).push(text)
+  }
+
+  let updated = 0
+  for (const [level, texts] of byLevel) {
+    const BATCH = 300
+    for (let i = 0; i < texts.length; i += BATCH) {
+      const res = await db.question.updateMany({
+        where: { text: { in: texts.slice(i, i + BATCH) } },
+        data: { academicLevel: level },
+      })
+      updated += res.count
+    }
+  }
+  return { skipped: false, updated }
 }
 
 async function seedAdmin() {
@@ -164,9 +203,20 @@ async function main() {
   const categories = await seedCategories()
   console.log(`   ✓ ${categories.size} catégories`)
 
-  const questionsCreated = await seedQuestions(categories)
+  // Le palier académique se calcule sur la banque entière : chaque question est
+  // située par rapport aux autres, pas jugée isolément.
+  const levels = assignAcademicLevels(getAllQuestions())
+
+  const questionsCreated = await seedQuestions(categories, levels)
   const questionsTotal = await db.question.count()
   console.log(`   ✓ ${questionsCreated} questions ajoutées (${questionsTotal} au total)`)
+
+  const backfill = await backfillAcademicLevels(levels)
+  console.log(
+    backfill.skipped
+      ? '   ✓ paliers académiques déjà attribués'
+      : `   ✓ ${backfill.updated} questions réparties du CEP au doctorat`
+  )
 
   const adminCreated = await seedAdmin()
   console.log(`   ✓ compte administrateur ${adminCreated ? 'créé' : 'déjà présent'} (${ADMIN_EMAIL})`)

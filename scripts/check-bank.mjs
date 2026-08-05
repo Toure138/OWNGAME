@@ -1,6 +1,8 @@
 // Contrôle qualité de la banque de questions.
 // Usage : node scripts/check-bank.mjs
-import { CATEGORIES, bankStats, toQuestion } from '../data/index.mjs'
+import { CATEGORIES, bankStats, toQuestion, getAllQuestions } from '../data/index.mjs'
+import { assignAcademicLevels } from '../data/levels.mjs'
+import { DEGREES } from '../src/lib/academic.mjs'
 
 const errors = []
 const warnings = []
@@ -48,10 +50,32 @@ for (const cat of CATEGORIES) {
 const maxShare = Math.max(...Object.values(letters)) / stats.total
 if (maxShare > 0.35) warnings.push(`Répartition des bonnes réponses déséquilibrée (${Math.round(maxShare * 100)} % sur une seule lettre)`)
 
+// Répartition en paliers académiques : un palier trop maigre rendrait son
+// examen répétitif, et le signaler ici évite de le découvrir en jouant.
+const levels = assignAcademicLevels(getAllQuestions())
+const perLevel = new Map(DEGREES.map(d => [d.code, 0]))
+for (const level of levels.values()) perLevel.set(level, (perLevel.get(level) || 0) + 1)
+for (const degree of DEGREES) {
+  const count = perLevel.get(degree.code) || 0
+  if (count < degree.questions * 2) {
+    warnings.push(
+      `Palier ${degree.short} : ${count} questions pour un examen de ${degree.questions} — trop peu pour varier les tentatives`
+    )
+  }
+}
+
 console.log('╭─ Banque de questions ─────────────────────────────')
 console.log(`│ Catégories : ${stats.categories}`)
 console.log(`│ Questions  : ${stats.total}`)
 console.log(`│ Réponses   : A=${letters.A} B=${letters.B} C=${letters.C} D=${letters.D}`)
+console.log('├─ Paliers du cursus ───────────────────────────────')
+for (const degree of DEGREES) {
+  const count = perLevel.get(degree.code) || 0
+  console.log(
+    `│ ${degree.short.padEnd(30)} ${String(count).padStart(4)}` +
+      `   (examen : ${degree.questions} questions)`
+  )
+}
 console.log('├─ Détail par catégorie ────────────────────────────')
 for (const c of stats.perCategory) console.log(`│ ${c.name.padEnd(30)} ${String(c.count).padStart(4)}`)
 console.log('╰───────────────────────────────────────────────────')

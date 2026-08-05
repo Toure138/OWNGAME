@@ -9,6 +9,7 @@ import { ErrorState } from '@/components/ui/states'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
   Trophy, Medal, Star, Zap, Flame, Crown, Target, Award, Lock, Sparkles, Timer, Swords,
+  Scroll, GraduationCap, BookOpen, Bot,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -34,6 +35,12 @@ const VISUALS: Record<string, { icon: React.ReactNode; tone: string }> = {
   STREAK_5: { icon: <Flame className="h-7 w-7" />, tone: 'text-orange-500' },
   SPEEDSTER: { icon: <Zap className="h-7 w-7" />, tone: 'text-yellow-500' },
   CENTURION: { icon: <Timer className="h-7 w-7" />, tone: 'text-teal-500' },
+  FIRST_DIPLOMA: { icon: <Scroll className="h-7 w-7" />, tone: 'text-emerald-500' },
+  BACHELIER: { icon: <GraduationCap className="h-7 w-7" />, tone: 'text-blue-500' },
+  DOCTEUR: { icon: <Crown className="h-7 w-7" />, tone: 'text-rose-500' },
+  CURSUS_COMPLET: { icon: <BookOpen className="h-7 w-7" />, tone: 'text-violet-600' },
+  MAJOR_DE_PROMO: { icon: <Sparkles className="h-7 w-7" />, tone: 'text-amber-500' },
+  MACHINE_SLAYER: { icon: <Bot className="h-7 w-7" />, tone: 'text-sky-600' },
 }
 
 export function AchievementsScreen() {

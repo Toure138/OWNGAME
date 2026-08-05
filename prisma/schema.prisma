@@ -4,8 +4,12 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// PostgreSQL plutôt que SQLite : la base vit dans un serveur distinct du
+// processus applicatif, donc les comptes, parties et classements survivent aux
+// redémarrages et aux redéploiements — ce qui n'était pas le cas d'un fichier
+// posé sur le disque éphémère de l'instance.
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -28,6 +32,12 @@ model User {
   draws         Int      @default(0)
   totalScore    Int      @default(0)
   bestStreak    Int      @default(0)
+  // Plus haut diplôme obtenu dans le parcours académique — dénormalisé depuis
+  // `diplomas` : il est affiché sur chaque ligne de classement et à côté du
+  // pseudo, deux endroits où une jointure supplémentaire ne se justifie pas.
+  highestDegree String?
+  examsPassed   Int      @default(0)
+  soloGames     Int      @default(0)
   lastSeenAt    DateTime?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -36,6 +46,7 @@ model User {
   gamesAsPlayerB Game[]   @relation("PlayerB")
   notifications  Notification[]
   achievements   Achievement[]
+  diplomas       Diploma[]
 
   @@index([totalScore])
   @@index([country])
@@ -61,6 +72,10 @@ model Question {
   correctAnswer String // "A" | "B" | "C" | "D"
   explanation   String?
   difficulty    String   @default("MEDIUM") // EASY | MEDIUM | HARD
+  // Palier du cursus : CEP | BEPC | BAC | LICENCE | MASTER | DOCTORAT.
+  // Calculé par `data/levels.mjs` au peuplement, modifiable question par
+  // question depuis l'administration.
+  academicLevel String   @default("BAC")
   categoryId    String
   category      Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
   timesAnswered Int      @default(0)
@@ -70,12 +85,26 @@ model Question {
 
   @@index([categoryId])
   @@index([difficulty])
+  @@index([academicLevel])
 }
 
 model Game {
   id             String    @id @default(cuid())
   playerAId      String
-  playerBId      String
+  // Nul en solo et en examen : l'adversaire est l'ordinateur, ou il n'y en a
+  // pas. Créer un compte fictif pour le représenter aurait été plus simple ici,
+  // mais il aurait fallu l'exclure du classement, du salon, de la recherche
+  // d'adversaire et de l'administration — une exception à tenir en cinq
+  // endroits plutôt qu'une colonne facultative.
+  playerBId      String?
+  // DUEL = deux joueurs humains | SOLO = contre l'ordinateur | EXAM = examen
+  mode           String    @default("DUEL")
+  // Profil de l'ordinateur en mode SOLO : NOVICE | AMATEUR | EXPERT | CHAMPION
+  botProfile     String?
+  // Diplôme visé en mode EXAM, et son résultat.
+  examLevel      String?
+  passed         Boolean?
+  mention        String?
   status         String    @default("WAITING") // WAITING | IN_PROGRESS | FINISHED
   categoryFilter String? // null = toutes catégories
   questionsData  String // JSON : détail de chaque question de la partie
@@ -93,12 +122,35 @@ model Game {
   finishedAt     DateTime?
   createdAt      DateTime  @default(now())
 
-  playerA User @relation("PlayerA", fields: [playerAId], references: [id], onDelete: Cascade)
-  playerB User @relation("PlayerB", fields: [playerBId], references: [id], onDelete: Cascade)
+  playerA User  @relation("PlayerA", fields: [playerAId], references: [id], onDelete: Cascade)
+  playerB User? @relation("PlayerB", fields: [playerBId], references: [id], onDelete: Cascade)
 
   @@index([playerAId])
   @@index([playerBId])
   @@index([finishedAt])
+  @@index([mode])
+}
+
+/// Diplôme décroché dans le parcours académique. Une seule occurrence par
+/// joueur et par diplôme : repasser un examen déjà réussi met à jour la
+/// mention si elle est meilleure, sans dupliquer la ligne.
+model Diploma {
+  id         String   @id @default(cuid())
+  userId     String
+  degree     String // CEP | BEPC | BAC | LICENCE | MASTER | DOCTORAT
+  mention    String // PASSABLE | ASSEZ_BIEN | BIEN | TRES_BIEN | EXCELLENT
+  percent    Int
+  correct    Int
+  total      Int
+  score      Int      @default(0)
+  attempts   Int      @default(1)
+  obtainedAt DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, degree])
+  @@index([userId])
+  @@index([degree])
 }
 
 model Notification {

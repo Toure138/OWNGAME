@@ -16,7 +16,18 @@ import { StatTile } from '@/components/ui/stat-tile'
 import { useToast } from '@/hooks/use-toast'
 import {
   Trophy, Target, Star, TrendingUp, Save, Crown, Flame, Loader2, Globe2, KeyRound, Shield,
+  GraduationCap,
 } from 'lucide-react'
+
+/** Titre porté par le détenteur de chaque diplôme. */
+const DEGREE_TITLES: Record<string, string> = {
+  CEP: 'Titulaire du CEP',
+  BEPC: 'Breveté',
+  BAC: 'Bachelier',
+  LICENCE: 'Licencié',
+  MASTER: 'Titulaire d’un master',
+  DOCTORAT: 'Docteur',
+}
 
 export function ProfileScreen() {
   const user = useApp(s => s.user)!
@@ -121,6 +132,10 @@ export function ProfileScreen() {
             <h2 className="text-xl font-bold">{user.pseudo}</h2>
             <p className="truncate text-sm text-muted-foreground">{user.email}</p>
 
+            <p className="mt-1 text-sm font-medium text-violet-600 dark:text-violet-400">
+              {DEGREE_TITLES[user.highestDegree ?? ''] ?? 'Candidat libre'}
+            </p>
+
             <div className="mt-3 flex flex-wrap justify-center gap-1.5">
               <Badge variant="outline" className="gap-1">
                 <Globe2 className="h-3 w-3" /> {user.country}
@@ -153,6 +168,12 @@ export function ProfileScreen() {
             </div>
 
             <div className="mt-3 flex flex-col gap-2">
+              <Button variant="outline" onClick={() => setView('academy')} className="gap-2">
+                <GraduationCap className="h-4 w-4" />
+                {user.examsPassed
+                  ? `Parcours — ${user.examsPassed}/6 diplômes`
+                  : 'Commencer le parcours'}
+              </Button>
               <Button variant="outline" onClick={() => setView('achievements')} className="gap-2">
                 <Star className="h-4 w-4" /> Mes succès
               </Button>

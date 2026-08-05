@@ -22,7 +22,7 @@ interface RandomRow {
 
 // GET /api/questions/random?categoryId=…&difficulty=…&limit=20
 //
-// Le tirage est délégué à SQLite (`ORDER BY RANDOM()`) plutôt que fait en
+// Le tirage est délégué à PostgreSQL (`ORDER BY RANDOM()`) plutôt que fait en
 // mémoire sur les premières lignes : avec un millier de questions, mélanger un
 // sous-ensemble arbitraire aurait rendu une grande partie de la banque
 // inatteignable.
