@@ -56,13 +56,45 @@ base vide à chaque redémarrage.
 
 **Correction — au choix.**
 
-*A. Par le blueprint (recommandé, la base est alors gérée avec le service)*
+*A bis. Le plus rapide : ajouter une variable plutôt que corriger l'ancienne*
+
+Si `DATABASE_URL` résiste — valeur gérée par le blueprint, ou modifiée à la main
+puis figée — inutile de se battre avec elle. L'application accepte une variable
+de repli, utilisée dès que `DATABASE_URL` est inexploitable :
+
+1. **New → PostgreSQL**, même région que le service web (`frankfurt`).
+2. Sur la page de la base, copiez son **Internal Database URL**.
+3. Service web → Settings → Environment → **Add Environment Variable** :
+   nom `POSTGRES_URL`, valeur l'URL copiée.
+4. **Manual Deploy → Deploy latest commit**.
+
+Les journaux de démarrage indiquent alors explicitement quelle variable a été
+retenue :
+
+```
+  base          : postgresql://qvgdm:***@dpg-….frankfurt-postgres.render.com/qvgdm
+  source        : POSTGRES_URL (DATABASE_URL est inutilisable)
+```
+
+Cette ligne est là pour que la situation ne s'installe pas : le jour où
+`DATABASE_URL` est corrigée, elle redevient prioritaire et la mention disparaît.
+`POSTGRES_URL` peut alors être supprimée. Les noms `DATABASE_URL_POSTGRES` et
+`POSTGRES_PRISMA_URL` sont reconnus de la même façon.
+
+*A. Par le blueprint (la base est alors gérée avec le service)*
 
 1. Dashboard Render → **Blueprints** → votre blueprint → **Sync**.
 2. Render détecte le bloc `databases` de `render.yaml`, crée la base
    PostgreSQL `qvgdm-db` et renseigne `DATABASE_URL` sur le service web.
 3. Le déploiement suivant démarre normalement : `db:prepare` crée les tables et
-   insère les 1000 questions.
+   insère la banque de questions.
+
+> Deux raisons fréquentes pour lesquelles cette synchronisation ne produit rien :
+> le service n'a jamais été créé depuis un blueprint (il n'y a alors aucune
+> entrée dans l'onglet **Blueprints**, et `render.yaml` est purement ignoré), ou
+> le compte possède déjà une base PostgreSQL sur le plan gratuit — la limite est
+> d'une seule, et la création échoue silencieusement. Dans les deux cas,
+> reportez-vous à la méthode *A bis* ci-dessus.
 
 > Si `DATABASE_URL` a déjà été modifiée à la main dans le tableau de bord,
 > **supprimez-la d'abord** (Settings → Environment). Une valeur saisie

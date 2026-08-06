@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PrismaClient } from '@prisma/client'
+import { resolveDatabaseUrl, explainMissingUrl } from '../src/lib/database-url.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const source = path.resolve(root, process.argv[2] || path.join('db', 'custom.db'))
@@ -120,13 +121,12 @@ async function main() {
     console.error('   vous partez d’une base vierge.')
     process.exit(1)
   }
-  if (!process.env.DATABASE_URL) {
-    console.error('❌ DATABASE_URL n’est pas définie : destination inconnue.')
-    process.exit(1)
-  }
-  if (process.env.DATABASE_URL.startsWith('file:')) {
-    console.error('❌ DATABASE_URL désigne encore un fichier SQLite.')
-    console.error('   Renseignez la chaîne de connexion PostgreSQL avant de migrer.')
+  // La destination doit être une base PostgreSQL : sans ce contrôle, une
+  // DATABASE_URL restée sur l'ancien fichier ferait « migrer » la base sur
+  // elle-même.
+  const resolved = resolveDatabaseUrl()
+  if (!resolved.url) {
+    console.error(explainMissingUrl(resolved.reason))
     process.exit(1)
   }
 
@@ -134,7 +134,7 @@ async function main() {
   console.log(`  source : ${source}`)
 
   const sqlite = new DatabaseSync(source, { readOnly: true })
-  const db = new PrismaClient()
+  const db = new PrismaClient({ datasourceUrl: resolved.url })
 
   try {
     // 1. Catégories — reconnues par leur nom.

@@ -14,8 +14,13 @@ import { PrismaClient } from '@prisma/client'
 import { CATEGORIES, toQuestion, getAllQuestions } from '../data/index.mjs'
 import { assignAcademicLevels } from '../data/levels.mjs'
 import { hashPassword } from '../src/lib/password.mjs'
+import { resolveDatabaseUrl } from '../src/lib/database-url.mjs'
 
-const db = new PrismaClient()
+// `prepare-db` transmet déjà la bonne valeur dans DATABASE_URL, mais le
+// peuplement s'exécute aussi seul (`npm run db:seed`) : il doit alors résoudre
+// la chaîne de la même façon, variables de repli comprises.
+const { url } = resolveDatabaseUrl()
+const db = new PrismaClient(url ? { datasourceUrl: url } : {})
 
 const ADMIN_EMAIL = process.env.ADMIN_EMAIL || 'admin@qvgdm.fr'
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123'

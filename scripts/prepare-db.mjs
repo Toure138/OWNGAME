@@ -14,12 +14,22 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { PrismaClient } from '@prisma/client'
+import { resolveDatabaseUrl, maskUrl, explainMissingUrl } from '../src/lib/database-url.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+/**
+ * Environnement transmis aux sous-processus.
+ *
+ * `DATABASE_URL` y est réécrite avec la chaîne réellement retenue : la CLI
+ * Prisma et le peuplement ne lisent que cette variable, et ignoreraient une
+ * chaîne fournie par une variable de repli.
+ */
+let childEnv = process.env
+
 function run(command, args, label) {
   console.log(`→ ${label}`)
-  execFileSync(command, args, { cwd: root, stdio: 'inherit', env: process.env })
+  execFileSync(command, args, { cwd: root, stdio: 'inherit', env: childEnv })
 }
 
 /**
@@ -36,17 +46,6 @@ function runPrisma(args, label) {
   // Repli : Prisma n'a pas été installé localement (installation partielle).
   console.warn('  CLI Prisma introuvable dans node_modules, tentative via npx')
   run(process.platform === 'win32' ? 'npx.cmd' : 'npx', ['--yes', 'prisma', ...args], label)
-}
-
-/** Masque le mot de passe : cette ligne finit dans les journaux de la plateforme. */
-function safeUrl(url) {
-  try {
-    const parsed = new URL(url)
-    if (parsed.password) parsed.password = '***'
-    return parsed.toString()
-  } catch {
-    return '(URL illisible)'
-  }
 }
 
 /**
@@ -88,45 +87,23 @@ async function main() {
   console.log(`  répertoire    : ${process.cwd()}`)
   console.log(`  port          : ${process.env.PORT || 'non défini'}`)
 
-  const url = process.env.DATABASE_URL
-  if (!url) {
-    console.error('❌ DATABASE_URL n’est pas définie.')
+  const resolved = resolveDatabaseUrl()
+  if (!resolved.url) {
+    console.error(explainMissingUrl(resolved.reason))
     process.exit(1)
   }
-  if (url.startsWith('file:')) {
-    // Vestige de l'ancienne base SQLite. Prisma refuserait cette URL de
-    // lui-même, mais avec un message qui n'indique pas quoi corriger — et sur
-    // une plateforme d'hébergement, ces quelques lignes sont tout ce dont on
-    // dispose pour comprendre pourquoi le service ne démarre pas.
-    console.error('❌ DATABASE_URL pointe vers un fichier SQLite (file:…).')
-    console.error('   Le projet utilise PostgreSQL depuis le passage à une base persistante.')
-    console.error('')
-    if (process.env.RENDER) {
-      // Le cas le plus fréquent : le service existait avant le changement de
-      // moteur. Render conserve les variables déjà enregistrées, et le bloc
-      // `fromDatabase` de render.yaml ne s'applique qu'à la synchronisation du
-      // blueprint — laquelle crée aussi la base.
-      console.error('   Sur Render, la variable enregistrée dans le service a été conservée.')
-      console.error('   Deux façons de la corriger :')
-      console.error('')
-      console.error('   A. Blueprint (recommandé) — Dashboard → Blueprints → votre blueprint')
-      console.error('      → « Sync ». Render crée la base « qvgdm-db » déclarée dans')
-      console.error('      render.yaml et renseigne DATABASE_URL automatiquement.')
-      console.error('      Si la variable a déjà été modifiée à la main, supprimez-la d’abord')
-      console.error('      dans Settings → Environment : une valeur saisie manuellement')
-      console.error('      l’emporte sur le blueprint et ne sera pas remplacée.')
-      console.error('')
-      console.error('   B. Manuellement — New → PostgreSQL, puis copiez son « Internal')
-      console.error('      Database URL » dans Settings → Environment → DATABASE_URL.')
-    } else {
-      console.error('   Exemple de valeur attendue :')
-      console.error('   postgresql://qvgdm:qvgdm@localhost:5432/qvgdm?schema=public')
-      console.error('')
-      console.error('   En local : `npm run db:up` démarre un PostgreSQL correspondant.')
-    }
-    process.exit(1)
+
+  // La chaîne retenue est réinjectée dans l'environnement des sous-processus :
+  // la CLI Prisma et le peuplement ne connaissent que `DATABASE_URL`.
+  childEnv = { ...process.env, DATABASE_URL: resolved.url }
+  process.env.DATABASE_URL = resolved.url
+
+  console.log(`  base          : ${maskUrl(resolved.url)}`)
+  if (resolved.source !== 'DATABASE_URL') {
+    // Sans cette ligne, un service qui tourne grâce à la variable de repli le
+    // ferait en silence, et la variable périmée resterait indéfiniment en place.
+    console.log(`  source        : ${resolved.source} (DATABASE_URL est inutilisable)`)
   }
-  console.log(`  base          : ${safeUrl(url)}`)
 
   console.log('→ Attente du serveur PostgreSQL')
   await waitForDatabase()
