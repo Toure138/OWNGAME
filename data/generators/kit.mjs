@@ -94,6 +94,16 @@ export function dans(name) {
   return `à ${name}`
 }
 
+/**
+ * Année, sans séparateur de milliers.
+ *
+ * `fr()` groupe les chiffres par trois, ce qui convient à une altitude mais
+ * produit « 1 932 » pour un millésime.
+ */
+export function year(value) {
+  return value < 0 ? `${-value} av. J.-C.` : String(value)
+}
+
 /** Accord du pluriel sur une unité simple. */
 export function unit(value, singular, plural = null) {
   return `${fr(value)} ${Math.abs(value) >= 2 ? (plural ?? singular + 's') : singular}`

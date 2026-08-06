@@ -13,6 +13,12 @@ import { TEMPLATES as CHIMIE } from './chimie.mjs'
 import { TEMPLATES as TELECOMS } from './telecoms.mjs'
 import { TEMPLATES as ECONOMIE } from './economie.mjs'
 import { TEMPLATES as GEOGRAPHIE } from './geographie.mjs'
+import { TEMPLATES as HISTOIRE } from './histoire.mjs'
+import {
+  CINEMA_TEMPLATES,
+  MUSIQUE_TEMPLATES,
+  LITTERATURE_TEMPLATES,
+} from './culture.mjs'
 
 /**
  * Répartition des questions générées entre les six paliers.
@@ -45,6 +51,10 @@ export const GENERATORS = [
   { category: 'Télécommunications', templates: TELECOMS },
   { category: 'Économie', templates: ECONOMIE },
   { category: 'Géographie', templates: GEOGRAPHIE },
+  { category: 'Histoire', templates: HISTOIRE },
+  { category: 'Cinéma', templates: CINEMA_TEMPLATES },
+  { category: 'Musique', templates: MUSIQUE_TEMPLATES },
+  { category: 'Littérature', templates: LITTERATURE_TEMPLATES },
 ]
 
 /**
