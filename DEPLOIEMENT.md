@@ -36,6 +36,55 @@ attend que PostgreSQL réponde, crée les tables et insère les 1000 questions.
 Aux démarrages suivants il ne fait rien : les données déjà en base sont
 conservées.
 
+## 2 bis. Service déjà déployé avant le passage à PostgreSQL
+
+**Symptôme.** Le build réussit, puis le démarrage s'arrête sur :
+
+```
+❌ DATABASE_URL pointe vers un fichier SQLite (file:…).
+==> Exited with status 1
+```
+
+**Cause.** Le service a été créé quand la base était encore un fichier SQLite.
+Render conserve les variables d'environnement déjà enregistrées : la valeur
+`file:/opt/render/project/src/db/qvgdm.db` est restée en place. Le bloc
+`fromDatabase` ajouté à `render.yaml` ne s'applique qu'à la **synchronisation du
+blueprint**, qui est aussi ce qui crée la base `qvgdm-db`. Tant que cette
+synchronisation n'a pas eu lieu, le service pointe vers un fichier qui n'existe
+plus et le démarrage échoue — volontairement, plutôt que de repartir sur une
+base vide à chaque redémarrage.
+
+**Correction — au choix.**
+
+*A. Par le blueprint (recommandé, la base est alors gérée avec le service)*
+
+1. Dashboard Render → **Blueprints** → votre blueprint → **Sync**.
+2. Render détecte le bloc `databases` de `render.yaml`, crée la base
+   PostgreSQL `qvgdm-db` et renseigne `DATABASE_URL` sur le service web.
+3. Le déploiement suivant démarre normalement : `db:prepare` crée les tables et
+   insère les 1000 questions.
+
+> Si `DATABASE_URL` a déjà été modifiée à la main dans le tableau de bord,
+> **supprimez-la d'abord** (Settings → Environment). Une valeur saisie
+> manuellement l'emporte sur le blueprint et ne serait pas remplacée par la
+> synchronisation.
+
+*B. À la main (si vous préférez gérer la base séparément)*
+
+1. **New → PostgreSQL**, même région que le service web (`frankfurt`).
+2. Copiez son **Internal Database URL**.
+3. Service web → Settings → Environment → remplacez `DATABASE_URL` par cette
+   valeur, puis **Manual Deploy → Deploy latest commit**.
+
+Une base hébergée ailleurs (Neon, Supabase) fonctionne de la même façon : collez
+sa chaîne de connexion, en ajoutant `?sslmode=require` si le fournisseur
+l'exige.
+
+**Reprise des données.** Rien à récupérer : l'ancienne base SQLite vivait sur le
+disque éphémère de l'instance et a déjà disparu à chaque redémarrage. Si vous
+disposez encore d'un fichier `.db` en local, voir « Reprise d'une ancienne base
+SQLite » plus bas.
+
 ## 3. Variables d'environnement
 
 `render.yaml` déclare tout le nécessaire. Deux valeurs sont marquées

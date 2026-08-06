@@ -2,7 +2,7 @@
 // Usage : node scripts/check-bank.mjs
 import { CATEGORIES, bankStats, toQuestion, getAllQuestions } from '../data/index.mjs'
 import { assignAcademicLevels } from '../data/levels.mjs'
-import { DEGREES } from '../src/lib/academic.mjs'
+import { DEGREES, DEGREE_CODES } from '../src/lib/academic.mjs'
 
 const errors = []
 const warnings = []
@@ -22,6 +22,12 @@ for (const cat of CATEGORIES) {
     if (props.some(p => !p || !String(p).trim())) errors.push(`${where} : proposition vide`)
     if (new Set(props.map(p => String(p).toLowerCase().trim())).size !== 4) errors.push(`${where} : propositions dupliquées`)
     if (!['EASY', 'MEDIUM', 'HARD'].includes(q.difficulty)) errors.push(`${where} : difficulté invalide`)
+    // Le palier est facultatif ; une valeur mal orthographiée serait en
+    // revanche ignorée en silence par le classement, et la question se
+    // retrouverait dans un palier arbitraire.
+    if (q.academicLevel && !DEGREE_CODES.includes(q.academicLevel)) {
+      errors.push(`${where} : palier inconnu (${q.academicLevel})`)
+    }
     const key = q.text.toLowerCase().replace(/\s+/g, ' ').trim()
     if (seen.has(key)) errors.push(`${where} : énoncé dupliqué avec ${seen.get(key)}`)
     else seen.set(key, where)

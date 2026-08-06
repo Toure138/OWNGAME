@@ -7,6 +7,7 @@ import { SCIENCES_TERRE, INFORMATIQUE, INTELLIGENCE_ARTIFICIELLE, TELECOMMUNICAT
 import { HISTOIRE, GEOGRAPHIE, POLITIQUE, ECONOMIE } from './questions/societe.mjs'
 import { CULTURE_GENERALE, SPORT, CINEMA, MUSIQUE } from './questions/culture.mjs'
 import { LITTERATURE, TECHNOLOGIE, SANTE, ENVIRONNEMENT } from './questions/savoirs.mjs'
+import { AVANCE } from './questions/avance.mjs'
 
 const DIFFICULTIES = { E: 'EASY', M: 'MEDIUM', H: 'HARD' }
 
@@ -14,7 +15,7 @@ const DIFFICULTIES = { E: 'EASY', M: 'MEDIUM', H: 'HARD' }
  * Métadonnées des catégories. `slug` sert d'identifiant stable côté seed,
  * `name` est la valeur unique stockée en base.
  */
-export const CATEGORIES = [
+const BASE_CATEGORIES = [
   { slug: 'mathematiques', name: 'Mathématiques', icon: 'Calculator', color: '#ef4444', description: 'Algèbre, géométrie, analyse', questions: MATHEMATIQUES },
   { slug: 'physique', name: 'Physique', icon: 'Atom', color: '#f97316', description: 'Mécanique, électricité, optique', questions: PHYSIQUE },
   { slug: 'chimie', name: 'Chimie', icon: 'FlaskConical', color: '#eab308', description: 'Chimie organique et inorganique', questions: CHIMIE },
@@ -36,6 +37,18 @@ export const CATEGORIES = [
   { slug: 'sante', name: 'Santé', icon: 'HeartPulse', color: '#dc2626', description: 'Médecine, nutrition, prévention', questions: SANTE },
   { slug: 'environnement', name: 'Environnement', icon: 'Leaf', color: '#16a34a', description: 'Climat, biodiversité, énergies', questions: ENVIRONNEMENT },
 ]
+
+/**
+ * Catégories complétées par la banque avancée.
+ *
+ * Les questions de `avance.mjs` rejoignent leur catégorie d'origine plutôt que
+ * d'en former une nouvelle : un joueur qui filtre sur « Physique » doit y
+ * trouver aussi bien la question de niveau primaire que celle de doctorat.
+ */
+export const CATEGORIES = BASE_CATEGORIES.map(category => {
+  const extra = AVANCE[category.slug]
+  return extra ? { ...category, questions: [...category.questions, ...extra] } : category
+})
 
 const LETTERS = ['A', 'B', 'C', 'D']
 
@@ -71,10 +84,18 @@ function permuteFor(text) {
 
 /**
  * Convertit un tuple compact en objet exploitable par Prisma.
- * Tuple : [énoncé, A, B, C, D, bonneRéponse, difficulté, explication?]
+ *
+ * Tuple : [énoncé, A, B, C, D, bonneRéponse, difficulté, explication?, palier?]
+ *
+ * Le neuvième élément fixe le palier du cursus (CEP … DOCTORAT). Il est
+ * facultatif : sans lui, `data/levels.mjs` situe la question par rapport aux
+ * autres. Le renseigner est en revanche indispensable pour une question
+ * réellement rédigée à un niveau donné — le classement automatique répartit par
+ * percentiles et ne peut, par construction, pas faire grossir le sommet de la
+ * pyramide.
  */
 export function toQuestion(tuple, categoryName) {
-  const [text, a, b, c, d, correct, difficulty, explanation] = tuple
+  const [text, a, b, c, d, correct, difficulty, explanation, academicLevel] = tuple
   const source = [a, b, c, d]
   const correctIndex = LETTERS.indexOf(correct)
   const order = permuteFor(text)
@@ -88,6 +109,7 @@ export function toQuestion(tuple, categoryName) {
     correctAnswer: LETTERS[order.indexOf(correctIndex)],
     difficulty: DIFFICULTIES[difficulty] || 'MEDIUM',
     explanation: explanation || null,
+    academicLevel: academicLevel || null,
     categoryName,
   }
 }

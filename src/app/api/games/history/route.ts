@@ -99,10 +99,18 @@ export const GET = guarded(async (req: NextRequest) => {
 
   const games2 = outcomeFilter ? mapped.filter(g => g.outcome === outcomeFilter) : mapped
 
-  // Statistiques agrégées sur l'ensemble de l'historique récupéré.
-  const wins = mapped.filter(g => g.outcome === 'WIN').length
-  const losses = mapped.filter(g => g.outcome === 'LOSS').length
-  const draws = mapped.filter(g => g.outcome === 'DRAW').length
+  // Le taux de victoire ne porte que sur les parties disputées contre un
+  // adversaire. Un examen ajourné n'est pas une défaite : le compter comme
+  // telle ferait chuter le taux de victoire d'un joueur qui révise.
+  const matches = mapped.filter(g => g.mode !== 'EXAM')
+  const exams = mapped.filter(g => g.mode === 'EXAM')
+
+  const wins = matches.filter(g => g.outcome === 'WIN').length
+  const losses = matches.filter(g => g.outcome === 'LOSS').length
+  const draws = matches.filter(g => g.outcome === 'DRAW').length
+
+  // La justesse, elle, a du sens sur tout l'historique : une question est une
+  // question, qu'elle vienne d'un duel ou d'une épreuve.
   const totalCorrect = mapped.reduce((s, g) => s + g.myCorrect, 0)
   const totalAnswered = mapped.reduce((s, g) => s + g.myQuestions, 0)
   const timed = mapped.filter(g => g.myAvgTime > 0)
@@ -111,10 +119,17 @@ export const GET = guarded(async (req: NextRequest) => {
     games: games2,
     stats: {
       total: mapped.length,
+      matches: matches.length,
+      duels: matches.filter(g => g.mode === 'DUEL').length,
+      solo: matches.filter(g => g.mode === 'SOLO').length,
       wins,
       losses,
       draws,
-      winRate: mapped.length ? Math.round((wins / mapped.length) * 100) : 0,
+      winRate: matches.length ? Math.round((wins / matches.length) * 100) : 0,
+      exams: {
+        taken: exams.length,
+        passed: exams.filter(g => g.passed).length,
+      },
       accuracy: totalAnswered ? Math.round((totalCorrect / totalAnswered) * 100) : 0,
       avgTime: timed.length
         ? Math.round(timed.reduce((s, g) => s + g.myAvgTime, 0) / timed.length)

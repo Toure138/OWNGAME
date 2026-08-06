@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, ListSkeleton, StatsSkeleton } from '@/component
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 import {
   History, Trophy, Target, Clock, Percent, Calendar, Flag, ChevronRight, Bot,
+  GraduationCap,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -45,10 +46,15 @@ interface GameRow {
 
 interface Stats {
   total: number
+  /** Parties disputées contre un adversaire : duels et solo, hors examens. */
+  matches: number
+  duels: number
+  solo: number
   wins: number
   losses: number
   draws: number
   winRate: number
+  exams: { taken: number; passed: number }
   accuracy: number
   avgTime: number
   bestScore: number
@@ -61,6 +67,7 @@ export function HistoryScreen() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [categories, setCategories] = useState<Record<string, string>>({})
   const [filter, setFilter] = useState<'ALL' | 'WIN' | 'LOSS' | 'DRAW'>('ALL')
+  const [modeFilter, setModeFilter] = useState<'ALL' | 'DUEL' | 'SOLO' | 'EXAM'>('ALL')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -93,8 +100,11 @@ export function HistoryScreen() {
   }, [load])
 
   const visible = useMemo(
-    () => (filter === 'ALL' ? games : games.filter(g => g.outcome === filter)),
-    [games, filter]
+    () =>
+      games
+        .filter(g => modeFilter === 'ALL' || g.mode === modeFilter)
+        .filter(g => filter === 'ALL' || g.outcome === filter),
+    [games, filter, modeFilter]
   )
 
   return (
@@ -116,7 +126,7 @@ export function HistoryScreen() {
             icon={<Percent className="h-4 w-4" />}
             value={`${stats.winRate}%`}
             label="Taux de victoire"
-            hint={`${stats.wins}V · ${stats.losses}D · ${stats.draws}N`}
+            hint={`${stats.wins}V · ${stats.losses}D · ${stats.draws}N — hors examens`}
             tone="success"
           />
           <StatTile
@@ -125,12 +135,22 @@ export function HistoryScreen() {
             label="Bonnes réponses"
             tone="info"
           />
-          <StatTile
-            icon={<Clock className="h-4 w-4" />}
-            value={stats.avgTime > 0 ? `${(stats.avgTime / 1000).toFixed(1)}s` : '—'}
-            label="Temps de réponse moyen"
-            tone="violet"
-          />
+          {stats.exams.taken > 0 ? (
+            <StatTile
+              icon={<GraduationCap className="h-4 w-4" />}
+              value={`${stats.exams.passed}/${stats.exams.taken}`}
+              label="Examens réussis"
+              hint={`${stats.solo} partie${stats.solo > 1 ? 's' : ''} solo`}
+              tone="violet"
+            />
+          ) : (
+            <StatTile
+              icon={<Clock className="h-4 w-4" />}
+              value={stats.avgTime > 0 ? `${(stats.avgTime / 1000).toFixed(1)}s` : '—'}
+              label="Temps de réponse moyen"
+              tone="violet"
+            />
+          )}
           <StatTile
             icon={<Trophy className="h-4 w-4" />}
             value={stats.bestScore.toLocaleString('fr-FR')}
@@ -141,19 +161,35 @@ export function HistoryScreen() {
       ) : null}
 
       {games.length > 0 && (
-        <ToggleGroup
-          type="single"
-          value={filter}
-          onValueChange={v => v && setFilter(v as typeof filter)}
-          variant="outline"
-          size="sm"
-          className="mb-3 justify-start"
-        >
-          <ToggleGroupItem value="ALL">Toutes ({games.length})</ToggleGroupItem>
-          <ToggleGroupItem value="WIN">Victoires ({stats?.wins ?? 0})</ToggleGroupItem>
-          <ToggleGroupItem value="LOSS">Défaites ({stats?.losses ?? 0})</ToggleGroupItem>
-          <ToggleGroupItem value="DRAW">Nuls ({stats?.draws ?? 0})</ToggleGroupItem>
-        </ToggleGroup>
+        <div className="mb-3 flex flex-wrap gap-2">
+          <ToggleGroup
+            type="single"
+            value={modeFilter}
+            onValueChange={v => v && setModeFilter(v as typeof modeFilter)}
+            variant="outline"
+            size="sm"
+            className="justify-start"
+          >
+            <ToggleGroupItem value="ALL">Tous les modes</ToggleGroupItem>
+            <ToggleGroupItem value="DUEL">Duels ({stats?.duels ?? 0})</ToggleGroupItem>
+            <ToggleGroupItem value="SOLO">Solo ({stats?.solo ?? 0})</ToggleGroupItem>
+            <ToggleGroupItem value="EXAM">Examens ({stats?.exams.taken ?? 0})</ToggleGroupItem>
+          </ToggleGroup>
+
+          <ToggleGroup
+            type="single"
+            value={filter}
+            onValueChange={v => v && setFilter(v as typeof filter)}
+            variant="outline"
+            size="sm"
+            className="justify-start"
+          >
+            <ToggleGroupItem value="ALL">Tous</ToggleGroupItem>
+            <ToggleGroupItem value="WIN">Gagnées ({stats?.wins ?? 0})</ToggleGroupItem>
+            <ToggleGroupItem value="LOSS">Perdues ({stats?.losses ?? 0})</ToggleGroupItem>
+            <ToggleGroupItem value="DRAW">Nuls ({stats?.draws ?? 0})</ToggleGroupItem>
+          </ToggleGroup>
+        </div>
       )}
 
       {loading ? (

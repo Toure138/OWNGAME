@@ -18,7 +18,9 @@
 // strictement déterministe, et modifiable question par question depuis
 // l'administration.
 
-import { DEGREES, DEFAULT_LEVEL, difficultyScore } from '../src/lib/academic.mjs'
+import { DEGREES, DEGREE_CODES, DEFAULT_LEVEL, difficultyScore } from '../src/lib/academic.mjs'
+
+const VALID_LEVELS = new Set(DEGREE_CODES)
 
 /** Hachage stable (FNV-1a 32 bits) — départage les scores rigoureusement égaux. */
 function hash32(str) {
@@ -46,15 +48,31 @@ export function levelQuotas(total) {
  * Classe une collection de questions et renvoie une correspondance
  * « énoncé → code du palier ».
  *
+ * Une question portant déjà un `academicLevel` n'est pas classée : elle est
+ * reprise telle quelle. C'est la seule façon de faire grossir le sommet de la
+ * pyramide — un découpage par percentiles maintient le doctorat à 7 % de la
+ * banque, quel que soit le nombre de questions difficiles ajoutées. Les quotas
+ * ne portent donc que sur les questions restantes, et les paliers explicites
+ * s'y ajoutent.
+ *
  * @param questions objets possédant au moins `text` et `difficulty`
  */
 export function assignAcademicLevels(questions) {
-  const ranked = questions
+  const levels = new Map()
+  const free = []
+  for (const q of questions) {
+    if (q.academicLevel && VALID_LEVELS.has(q.academicLevel)) {
+      levels.set(q.text, q.academicLevel)
+    } else {
+      free.push(q)
+    }
+  }
+
+  const ranked = free
     .map(q => ({ text: q.text, score: difficultyScore(q), tie: hash32(q.text || '') }))
     .sort((a, b) => a.score - b.score || a.tie - b.tie)
 
   const quotas = levelQuotas(ranked.length)
-  const levels = new Map()
 
   let cursor = 0
   for (const quota of quotas) {

@@ -60,7 +60,13 @@ function ToggleGroupItem({
           variant: context.variant || variant,
           size: context.size || size,
         }),
-        "min-w-0 flex-1 shrink-0 rounded-none shadow-none first:rounded-l-md last:rounded-r-md focus:z-10 focus-visible:z-10 data-[variant=outline]:border-l-0 data-[variant=outline]:first:border-l",
+        // `basis-auto` corrige le défaut de `flex-1`, qui pose la largeur de
+        // base à zéro : tous les boutons recevaient alors la même largeur, et
+        // les libellés les plus longs débordaient sur le bouton voisin
+        // (`whitespace-nowrap` les empêchant de se replier). La base suit
+        // désormais le contenu, et `flex-grow` continue d'occuper la place
+        // restante quand le groupe est étiré.
+        "min-w-0 flex-1 basis-auto shrink-0 rounded-none shadow-none first:rounded-l-md last:rounded-r-md focus:z-10 focus-visible:z-10 data-[variant=outline]:border-l-0 data-[variant=outline]:first:border-l",
         className
       )}
       {...props}
