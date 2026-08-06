@@ -106,7 +106,10 @@ export function getAllQuestions() {
       all.push(toQuestion(tuple, cat.name))
     }
   }
-  all.push(...getGeneratedQuestions(GENERATED_PER_CATEGORY))
+  // Les énoncés rédigés sont transmis au générateur, qui ne les reprendra pas :
+  // l'énoncé est la clé d'unicité en base, un doublon ferait échouer le
+  // peuplement.
+  all.push(...getGeneratedQuestions(GENERATED_PER_CATEGORY, all.map(q => q.text)))
   cache = all
   return all
 }

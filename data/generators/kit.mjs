@@ -70,6 +70,30 @@ export function sup(value) {
   return String(value).split('').map(c => SUPERSCRIPTS[c] ?? c).join('')
 }
 
+/**
+ * Article contracté devant un nom qui porte déjà le sien.
+ *
+ * Les tables de faits stockent « le Tchad », « les Pays-Bas », « l’Inde » :
+ * concaténer naïvement donnerait « de le Tchad ». Une question mal accordée se
+ * remarque immédiatement et discrédite tout le lot.
+ */
+export function de(name) {
+  if (name.startsWith('les ')) return `des ${name.slice(4)}`
+  if (name.startsWith('le ')) return `du ${name.slice(3)}`
+  if (name.startsWith('la ')) return `de ${name}`
+  if (name.startsWith('l’') || name.startsWith("l'")) return `de ${name}`
+  return `de ${name}`
+}
+
+/** « en France », « au Tchad », « aux Pays-Bas » : préposition de lieu. */
+export function dans(name) {
+  if (name.startsWith('les ')) return `aux ${name.slice(4)}`
+  if (name.startsWith('le ')) return `au ${name.slice(3)}`
+  if (name.startsWith('la ')) return `en ${name.slice(3)}`
+  if (name.startsWith('l’') || name.startsWith("l'")) return `en ${name.slice(2)}`
+  return `à ${name}`
+}
+
 /** Accord du pluriel sur une unité simple. */
 export function unit(value, singular, plural = null) {
   return `${fr(value)} ${Math.abs(value) >= 2 ? (plural ?? singular + 's') : singular}`

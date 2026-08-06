@@ -12,6 +12,7 @@ import { TEMPLATES as PHYSIQUE } from './physique.mjs'
 import { TEMPLATES as CHIMIE } from './chimie.mjs'
 import { TEMPLATES as TELECOMS } from './telecoms.mjs'
 import { TEMPLATES as ECONOMIE } from './economie.mjs'
+import { TEMPLATES as GEOGRAPHIE } from './geographie.mjs'
 
 /**
  * Répartition des questions générées entre les six paliers.
@@ -43,6 +44,7 @@ export const GENERATORS = [
   { category: 'Chimie', templates: CHIMIE },
   { category: 'Télécommunications', templates: TELECOMS },
   { category: 'Économie', templates: ECONOMIE },
+  { category: 'Géographie', templates: GEOGRAPHIE },
 ]
 
 /**
@@ -53,9 +55,11 @@ export const GENERATORS = [
  * boucle sans garde-fou tournerait indéfiniment sur un palier dont l'espace de
  * combinaisons est épuisé.
  */
-export function generateForCategory(category, templates, target, seed) {
+export function generateForCategory(category, templates, target, seed, reserved = new Set()) {
   const rng = createRng(seed)
-  const seen = new Set()
+  // Les énoncés déjà écrits à la main sont réservés : une question générée qui
+  // les reprendrait ferait échouer l'insertion, l'énoncé étant unique en base.
+  const seen = new Set(reserved)
   const out = []
 
   for (const [level, share] of LEVEL_SHARES) {
@@ -96,12 +100,15 @@ export function generateForCategory(category, templates, target, seed) {
  *
  * @param target nombre de questions visé par catégorie
  */
-export function getGeneratedQuestions(target = 1000) {
+export function getGeneratedQuestions(target = 1000, reservedTexts = []) {
+  const reserved = new Set(reservedTexts.map(t => t.toLowerCase()))
   const all = []
   GENERATORS.forEach(({ category, templates }, index) => {
     // Une graine par catégorie : ajouter une catégorie ne doit pas décaler les
     // questions déjà produites pour les autres.
-    all.push(...generateForCategory(category, templates, target, 0x5eed + index * 7919))
+    all.push(
+      ...generateForCategory(category, templates, target, 0x5eed + index * 7919, reserved)
+    )
   })
   return all
 }
