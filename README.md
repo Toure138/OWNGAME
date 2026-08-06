@@ -1,7 +1,7 @@
 # Qui veut gagner 20 millions ?
 
 Quiz multijoueur en temps réel. Deux joueurs s'affrontent sur 20 questions
-tirées d'une banque de **1000 questions réparties en 20 catégories**. Chaque
+tirées d'une banque de **7054 questions réparties en 20 catégories**. Chaque
 joueur traite la moitié des questions, avec 20 secondes de réflexion et un bonus
 de points proportionnel à sa rapidité.
 
@@ -118,6 +118,33 @@ affiché à côté de son pseudo, y compris dans le classement.
 L'ordre du cursus est vérifié côté serveur : appeler directement l'API pour
 passer le doctorat sans avoir le CEP renvoie une erreur 403.
 
+### D'où viennent les 7054 questions
+
+| Origine | Nombre | Catégories |
+| ------- | ------ | ---------- |
+| Rédigées à la main | 1054 | Les 20 catégories |
+| Générées | 6000 | Mathématiques, Physique, Chimie, Informatique, Télécommunications, Économie — 1000 chacune |
+
+Les six catégories « calculables » atteignent 1000 questions grâce aux
+générateurs de [`data/generators/`](./data/generators/). Le principe tient en
+une phrase : **la réponse n'est jamais écrite, elle est calculée**. Un gabarit
+tire ses paramètres — deux nombres à multiplier, une molécule, une fréquence —
+puis dérive la bonne réponse et ses leurres. Une question produite ainsi est
+juste par construction, ce qui permet d'en fabriquer des milliers sans
+multiplier les erreurs factuelles.
+
+Le tirage est déterministe : l'énoncé sert de clé d'unicité en base, une
+génération aléatoire ferait diverger la banque à chaque peuplement.
+
+Les quatorze autres catégories restent à 50-56 questions rédigées. **Elles ne
+peuvent pas être générées** : une question d'histoire ou de cinéma suppose des
+faits, et les inventer produirait des énoncés faux. Les étoffer demande un
+travail de rédaction, pas de code.
+
+Chaque gabarit déclare le palier auquel il appartient, si bien que les six
+catégories générées couvrent les six niveaux de façon régulière — environ 210
+questions au CEP et 105 au doctorat pour chacune.
+
 ### Comment les questions ont été réparties en six paliers
 
 La banque était rédigée avec trois difficultés seulement, et très inégalement :
@@ -132,6 +159,12 @@ lexicale de l'énoncé départage — puis découpe ce classement en une pyramid
 ```
 CEP 240 · BEPC 230 · Bac 200 · Licence 150 · Master 110 · Doctorat 70
 ```
+
+Ce découpage ne s'applique qu'aux questions rédigées sans palier explicite. Une
+question qui en déclare un — celles de `data/questions/avance.mjs` et toutes
+celles des générateurs — le conserve tel quel : un découpage par percentiles
+maintiendrait le doctorat à 7 % de la banque quoi qu'on ajoute. Sur l'ensemble,
+la banque compte aujourd'hui **1440 questions au CEP et 696 au doctorat**.
 
 Le classement est strictement déterministe, et chaque question reste modifiable
 palier par palier depuis l'administration. Le peuplement ne recalcule jamais une
@@ -202,8 +235,10 @@ décrit le service, la commande de build, le démarrage et la sonde de santé.
 
 ```
 data/                        Banque de questions (JavaScript pur)
-  index.mjs                  Catalogue des catégories + permutation des propositions
-  questions/*.mjs            1000 questions en tuples compacts
+  index.mjs                  Catalogue des catégories + agrégation de la banque
+  permute.mjs                Placement déterministe de la bonne réponse
+  questions/*.mjs            1054 questions rédigées, en tuples compacts
+  generators/*.mjs           6000 questions calculées, 1000 par matière
 prisma/schema.prisma         Modèle de données
   levels.mjs                 Répartition de la banque en six paliers académiques
 docker-compose.yml           PostgreSQL de développement

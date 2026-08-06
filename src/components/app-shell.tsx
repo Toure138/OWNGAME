@@ -229,7 +229,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
         <footer className="hidden border-t py-3 md:block">
           <div className="container mx-auto max-w-7xl px-4 text-center text-xs text-muted-foreground">
-            🏆 Qui veut gagner 20 millions ? — 1000 questions, 20 catégories, du CEP au doctorat
+            🏆 Qui veut gagner 20 millions ? — 7 000 questions, 20 catégories, du CEP au doctorat
           </div>
         </footer>
 

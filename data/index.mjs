@@ -8,6 +8,8 @@ import { HISTOIRE, GEOGRAPHIE, POLITIQUE, ECONOMIE } from './questions/societe.m
 import { CULTURE_GENERALE, SPORT, CINEMA, MUSIQUE } from './questions/culture.mjs'
 import { LITTERATURE, TECHNOLOGIE, SANTE, ENVIRONNEMENT } from './questions/savoirs.mjs'
 import { AVANCE } from './questions/avance.mjs'
+import { permuteFor } from './permute.mjs'
+import { getGeneratedQuestions } from './generators/index.mjs'
 
 const DIFFICULTIES = { E: 'EASY', M: 'MEDIUM', H: 'HARD' }
 
@@ -52,36 +54,6 @@ export const CATEGORIES = BASE_CATEGORIES.map(category => {
 
 const LETTERS = ['A', 'B', 'C', 'D']
 
-/** Hachage stable (FNV-1a 32 bits) d'une chaîne, utilisé comme graine de permutation. */
-function hash32(str) {
-  let h = 0x811c9dc5
-  for (let i = 0; i < str.length; i++) {
-    h ^= str.charCodeAt(i)
-    h = Math.imul(h, 0x01000193) >>> 0
-  }
-  return h >>> 0
-}
-
-/**
- * Les questions sont rédigées avec la bonne réponse souvent en position B.
- * On applique une permutation déterministe des quatre propositions, dérivée de
- * l'énoncé : la répartition A/B/C/D devient équilibrée, et le résultat reste
- * identique d'un seed à l'autre (idempotence du peuplement de la base).
- */
-function permuteFor(text) {
-  const order = [0, 1, 2, 3]
-  let seed = hash32(text)
-  // Mélange de Fisher-Yates piloté par un générateur congruentiel linéaire.
-  // On consomme les bits de poids fort : ceux de poids faible d'un LCG ont une
-  // période très courte et produiraient une répartition A/B/C/D déséquilibrée.
-  for (let i = order.length - 1; i > 0; i--) {
-    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0
-    const j = (seed >>> 16) % (i + 1)
-    ;[order[i], order[j]] = [order[j], order[i]]
-  }
-  return order
-}
-
 /**
  * Convertit un tuple compact en objet exploitable par Prisma.
  *
@@ -114,23 +86,46 @@ export function toQuestion(tuple, categoryName) {
   }
 }
 
-/** Retourne toutes les questions de la banque, aplaties. */
+/** Nombre de questions produites par catégorie pour les matières calculables. */
+export const GENERATED_PER_CATEGORY = 1000
+
+// La génération coûte quelques dizaines de millisecondes ; les scripts appellent
+// `getAllQuestions` plusieurs fois de suite, on ne la refait pas à chaque appel.
+let cache = null
+
+/**
+ * Toutes les questions de la banque, aplaties : celles rédigées à la main dans
+ * `data/questions/`, puis celles produites par les générateurs.
+ */
 export function getAllQuestions() {
+  if (cache) return cache
   const all = []
   for (const cat of CATEGORIES) {
     for (const tuple of cat.questions) {
       all.push(toQuestion(tuple, cat.name))
     }
   }
+  all.push(...getGeneratedQuestions(GENERATED_PER_CATEGORY))
+  cache = all
   return all
 }
 
 /** Statistiques de la banque, utilisées par les scripts de vérification. */
 export function bankStats() {
-  const perCategory = CATEGORIES.map(c => ({ name: c.name, count: c.questions.length }))
+  const counts = new Map(CATEGORIES.map(c => [c.name, 0]))
+  let written = 0
+  let generated = 0
+  for (const q of getAllQuestions()) {
+    counts.set(q.categoryName, (counts.get(q.categoryName) || 0) + 1)
+    if (q.generated) generated++
+    else written++
+  }
+  const perCategory = CATEGORIES.map(c => ({ name: c.name, count: counts.get(c.name) || 0 }))
   return {
     categories: CATEGORIES.length,
-    total: perCategory.reduce((sum, c) => sum + c.count, 0),
+    total: written + generated,
+    written,
+    generated,
     perCategory,
   }
 }

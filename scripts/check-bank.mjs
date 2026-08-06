@@ -34,6 +34,31 @@ for (const cat of CATEGORIES) {
   })
 }
 
+// Contrôle de la banque complète, questions générées comprises. Les gabarits
+// calculent leurs réponses, mais rien ne garantit a priori que leurs leurres
+// restent distincts ni que leurs énoncés ne se recoupent pas.
+const everything = getAllQuestions()
+const globalSeen = new Map()
+for (const q of everything) {
+  const where = `${q.categoryName}${q.generated ? ' (généré)' : ''} « ${q.text.slice(0, 44)}… »`
+  const props = [q.propositionA, q.propositionB, q.propositionC, q.propositionD]
+  if (props.some(p => p === null || p === undefined || !String(p).trim())) {
+    errors.push(`${where} : proposition vide`)
+  }
+  if (new Set(props.map(p => String(p).toLowerCase().trim())).size !== 4) {
+    errors.push(`${where} : propositions dupliquées`)
+  }
+  if (!['A', 'B', 'C', 'D'].includes(q.correctAnswer)) {
+    errors.push(`${where} : bonne réponse invalide`)
+  }
+  if (q.academicLevel && !DEGREE_CODES.includes(q.academicLevel)) {
+    errors.push(`${where} : palier inconnu (${q.academicLevel})`)
+  }
+  const key = q.text.toLowerCase().replace(/\s+/g, ' ').trim()
+  if (globalSeen.has(key)) errors.push(`${where} : énoncé dupliqué avec ${globalSeen.get(key)}`)
+  else globalSeen.set(key, where)
+}
+
 const stats = bankStats()
 const target = 50
 for (const c of stats.perCategory) {
@@ -58,7 +83,7 @@ if (maxShare > 0.35) warnings.push(`Répartition des bonnes réponses déséquil
 
 // Répartition en paliers académiques : un palier trop maigre rendrait son
 // examen répétitif, et le signaler ici évite de le découvrir en jouant.
-const levels = assignAcademicLevels(getAllQuestions())
+const levels = assignAcademicLevels(everything)
 const perLevel = new Map(DEGREES.map(d => [d.code, 0]))
 for (const level of levels.values()) perLevel.set(level, (perLevel.get(level) || 0) + 1)
 for (const degree of DEGREES) {
@@ -72,7 +97,7 @@ for (const degree of DEGREES) {
 
 console.log('╭─ Banque de questions ─────────────────────────────')
 console.log(`│ Catégories : ${stats.categories}`)
-console.log(`│ Questions  : ${stats.total}`)
+console.log(`│ Questions  : ${stats.total}  (${stats.written} rédigées, ${stats.generated} générées)`)
 console.log(`│ Réponses   : A=${letters.A} B=${letters.B} C=${letters.C} D=${letters.D}`)
 console.log('├─ Paliers du cursus ───────────────────────────────')
 for (const degree of DEGREES) {

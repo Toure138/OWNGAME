@@ -11,7 +11,7 @@
 //   SEED_DEMO_USERS=true          équivalent de --demo
 
 import { PrismaClient } from '@prisma/client'
-import { CATEGORIES, toQuestion, getAllQuestions } from '../data/index.mjs'
+import { CATEGORIES, getAllQuestions } from '../data/index.mjs'
 import { assignAcademicLevels } from '../data/levels.mjs'
 import { hashPassword } from '../src/lib/password.mjs'
 import { resolveDatabaseUrl } from '../src/lib/database-url.mjs'
@@ -78,26 +78,27 @@ async function seedQuestions(categoriesByName, levels) {
     (await db.question.findMany({ select: { text: true } })).map(q => q.text)
   )
 
+  // `getAllQuestions` réunit les questions rédigées à la main et celles
+  // produites par les générateurs : le peuplement n'a pas à savoir d'où elles
+  // viennent, seulement à quelle catégorie elles appartiennent.
   const toCreate = []
-  for (const cat of CATEGORIES) {
-    const category = categoriesByName.get(cat.name)
-    for (const tuple of cat.questions) {
-      const q = toQuestion(tuple, cat.name)
-      if (existing.has(q.text)) continue
-      existing.add(q.text) // garde-fou si la banque contenait un doublon
-      toCreate.push({
-        text: q.text,
-        propositionA: q.propositionA,
-        propositionB: q.propositionB,
-        propositionC: q.propositionC,
-        propositionD: q.propositionD,
-        correctAnswer: q.correctAnswer,
-        explanation: q.explanation,
-        difficulty: q.difficulty,
-        academicLevel: levels.get(q.text) || 'BAC',
-        categoryId: category.id,
-      })
-    }
+  for (const q of getAllQuestions()) {
+    if (existing.has(q.text)) continue
+    existing.add(q.text) // garde-fou si la banque contenait un doublon
+    const category = categoriesByName.get(q.categoryName)
+    if (!category) continue
+    toCreate.push({
+      text: q.text,
+      propositionA: q.propositionA,
+      propositionB: q.propositionB,
+      propositionC: q.propositionC,
+      propositionD: q.propositionD,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+      difficulty: q.difficulty,
+      academicLevel: q.academicLevel || levels.get(q.text) || 'BAC',
+      categoryId: category.id,
+    })
   }
 
   // PostgreSQL plafonne à 65535 le nombre de paramètres d'une requête, et
