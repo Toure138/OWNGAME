@@ -117,6 +117,37 @@ disque éphémère de l'instance et a déjà disparu à chaque redémarrage. Si 
 disposez encore d'un fichier `.db` en local, voir « Reprise d'une ancienne base
 SQLite » plus bas.
 
+## 2 ter. Le site s'affiche mais toutes les requêtes POST renvoient 404
+
+**Symptôme.** La page se charge, `/api/health` répond, et pourtant rien ne
+fonctionne : impossible de se connecter, d'entrer au salon ou de répondre. La
+console du navigateur répète :
+
+```
+POST https://…/api/realtime/join 404 (Not Found)
+```
+
+Les requêtes GET passent, les POST échouent — c'est la signature du problème.
+
+**Cause.** Un dossier `.next` hérité d'une construction antérieure. Ses
+manifestes de routes sont réécrits, ses fragments serveur non : Next sert alors
+des chemins tirés d'un inventaire périmé, dans lequel les gestionnaires POST des
+routes ajoutées depuis n'existent pas. Render restaure justement un cache de
+construction entre deux déploiements — la ligne `==> Downloading cache…` en tête
+des journaux de build.
+
+**Correction.** Déjà en place : `npm run build` commence par
+[`scripts/clean-build.mjs`](./scripts/clean-build.mjs), qui vide `.next` en
+conservant `.next/cache` (le cache de compilation, sans effet sur le routage).
+Un simple **Manual Deploy → Deploy latest commit** suffit donc.
+
+Si le service tourne encore sur une image construite avant cette correction,
+**Manual Deploy → Clear build cache & deploy** produit le même résultat en une
+fois.
+
+En local, le même symptôme apparaît en enchaînant `next build` puis `next dev` :
+`rm -rf .next` le fait disparaître.
+
 ## 3. Variables d'environnement
 
 `render.yaml` déclare tout le nécessaire. Deux valeurs sont marquées
