@@ -11,11 +11,24 @@
 import { persistFinishedGame, type PersistQuestion } from './game-persistence'
 import { botUserId, decide, getBotProfile, isBotId, type BotProfile } from './bot'
 import { getDegree, mentionFor } from './academic.mjs'
+import {
+  DEFAULT_QUESTIONS,
+  MAX_QUESTIONS,
+  MIN_QUESTIONS,
+  QUESTION_CHOICES,
+} from './game-options'
 
 export type GameMode = 'DUEL' | 'SOLO' | 'EXAM'
 
 export const GAME_CONFIG = {
-  questionsPerGame: 20,
+  // Repris de `game-options.ts`, que l'interface importe sans embarquer le
+  // moteur de jeu. Toutes les longueurs proposées sont paires : en duel comme en
+  // solo, chacun traite exactement la moitié des questions, et une valeur
+  // impaire donnerait un tour de plus à l'un des deux camps.
+  questionsPerGame: DEFAULT_QUESTIONS,
+  questionChoices: QUESTION_CHOICES,
+  minQuestions: MIN_QUESTIONS,
+  maxQuestions: MAX_QUESTIONS,
   timerSeconds: 20,
   /** Délai d'affichage du résultat avant la question suivante. */
   resultDelayMs: 2600,
@@ -67,6 +80,8 @@ interface Invitation {
   fromLevel: number
   toUserId: string
   categoryFilter: string | null
+  /** Longueur choisie par l'invitant, transmise jusqu'au lancement. */
+  questionCount: number
   createdAt: number
 }
 
@@ -615,6 +630,25 @@ export interface StartQuestionInput {
 }
 
 /**
+ * Ramène une longueur de partie demandée dans les bornes admises, et la rend
+ * paire.
+ *
+ * Appliqué côté serveur et non seulement dans l'interface : l'API est
+ * accessible directement, et une partie de 3 ou de 10 000 questions n'a pas de
+ * sens. Une valeur impaire donnerait par ailleurs un tour de plus à l'un des
+ * deux camps.
+ */
+export function normaliseQuestionCount(requested: unknown): number {
+  const value = Number(requested)
+  if (!Number.isFinite(value)) return GAME_CONFIG.questionsPerGame
+  const clamped = Math.min(
+    GAME_CONFIG.maxQuestions,
+    Math.max(GAME_CONFIG.minQuestions, Math.round(value))
+  )
+  return clamped - (clamped % 2)
+}
+
+/**
  * Adversaire qui n'a pas de compte : ordinateur ou jury d'examen. Il occupe la
  * place du joueur B dans la session sans jamais rejoindre le salon.
  */
@@ -846,7 +880,8 @@ export const realtime = {
     userId: string,
     botCode: string,
     categoryFilter: string | null,
-    questions: StartQuestionInput[]
+    questions: StartQuestionInput[],
+    questionCount: number = GAME_CONFIG.questionsPerGame
   ): { ok: boolean; gameId?: string; error?: string } {
     const player = state.onlinePlayers.get(userId)
     if (!player) return { ok: false, error: "Vous n'êtes plus connecté au salon" }
@@ -871,7 +906,7 @@ export const realtime = {
       playerB: opponent,
       categoryFilter,
       questions,
-      maxQuestions: GAME_CONFIG.questionsPerGame,
+      maxQuestions: normaliseQuestionCount(questionCount),
       timerSeconds: GAME_CONFIG.timerSeconds,
       alternate: true,
     })
@@ -924,7 +959,8 @@ export const realtime = {
   sendInvite(
     fromUserId: string,
     toUserId: string,
-    categoryFilter: string | null
+    categoryFilter: string | null,
+    questionCount: number = GAME_CONFIG.questionsPerGame
   ): { ok: boolean; invitationId?: string; error?: string } {
     if (fromUserId === toUserId) {
       return { ok: false, error: 'Vous ne pouvez pas vous défier vous-même' }
@@ -951,6 +987,7 @@ export const realtime = {
       fromLevel: from.level,
       toUserId,
       categoryFilter,
+      questionCount: normaliseQuestionCount(questionCount),
       createdAt: Date.now(),
     }
     state.invitations.set(invitation.id, invitation)
@@ -966,6 +1003,7 @@ export const realtime = {
     ok: boolean
     error?: string
     categoryFilter?: string | null
+    questionCount?: number
     opponentId?: string
     opponentPseudo?: string
   } {
@@ -998,12 +1036,16 @@ export const realtime = {
       opponentAvatarUrl: playerB.avatarUrl,
       opponentLevel: playerB.level,
       categoryFilter: inv.categoryFilter,
+      // La longueur a été fixée à l'invitation : l'invitant la relaie telle
+      // quelle au lancement, sans que l'adversaire puisse la modifier.
+      questionCount: inv.questionCount,
     })
     pushEvent(inv.toUserId, 'game:pending', { opponentPseudo: playerA.pseudo })
 
     return {
       ok: true,
       categoryFilter: inv.categoryFilter,
+      questionCount: inv.questionCount,
       opponentId: inv.toUserId,
       opponentPseudo: playerB.pseudo,
     }
@@ -1023,7 +1065,8 @@ export const realtime = {
     fromUserId: string,
     opponentId: string,
     categoryFilter: string | null,
-    questions: StartQuestionInput[]
+    questions: StartQuestionInput[],
+    questionCount: number = GAME_CONFIG.questionsPerGame
   ): { ok: boolean; gameId?: string; error?: string } {
     const playerA = state.onlinePlayers.get(fromUserId)
     const playerB = state.onlinePlayers.get(opponentId)
@@ -1044,7 +1087,7 @@ export const realtime = {
       playerB,
       categoryFilter,
       questions,
-      maxQuestions: GAME_CONFIG.questionsPerGame,
+      maxQuestions: normaliseQuestionCount(questionCount),
       timerSeconds: GAME_CONFIG.timerSeconds,
       alternate: true,
     })

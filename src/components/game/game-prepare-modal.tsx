@@ -18,6 +18,8 @@ interface Props {
     opponentPseudo: string
     opponentAvatarUrl: string | null
     categoryFilter: string | null
+    /** Longueur fixée à l'invitation, relayée telle quelle au lancement. */
+    questionCount: number
   }
   onClose: () => void
 }
@@ -43,10 +45,15 @@ export function GamePrepareModal({ opponent, onClose }: Props) {
   }, [opponent.categoryFilter])
 
   // Les questions sont tirées par le serveur : le client n'envoie que
-  // l'adversaire et la catégorie.
+  // l'adversaire, la catégorie et la longueur convenue.
   async function launch() {
     setLoading(true)
-    const result = await startGame(token, opponent.opponentId, opponent.categoryFilter)
+    const result = await startGame(
+      token,
+      opponent.opponentId,
+      opponent.categoryFilter,
+      opponent.questionCount
+    )
     if (result.ok) {
       toast({ title: 'Partie lancée', description: 'Bonne chance 🎯' })
       onClose()
@@ -83,7 +90,7 @@ export function GamePrepareModal({ opponent, onClose }: Props) {
         </div>
 
         <div className="flex flex-wrap justify-center gap-2 text-xs">
-          <Badge variant="secondary">20 questions</Badge>
+          <Badge variant="secondary">{opponent.questionCount} questions</Badge>
           <Badge variant="secondary">20 s par question</Badge>
           <Badge variant="secondary">
             {opponent.categoryFilter ? (categoryName ?? 'Catégorie choisie') : 'Toutes catégories'}

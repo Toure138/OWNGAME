@@ -98,6 +98,13 @@ export function InvitationModal() {
               <Badge variant="outline" className="text-[10px]">
                 {categoryLabel}
               </Badge>
+              {/* La longueur est fixée par l'invitant : l'invité l'accepte en
+                  acceptant le défi, autant la lui montrer. */}
+              {current.questionCount ? (
+                <Badge variant="outline" className="text-[10px]">
+                  {current.questionCount} questions
+                </Badge>
+              ) : null}
             </div>
           </div>
         </div>

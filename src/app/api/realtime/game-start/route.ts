@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { realtime, GAME_CONFIG } from '@/lib/realtime'
+import { realtime, normaliseQuestionCount, GAME_CONFIG } from '@/lib/realtime'
 import { pickQuestions } from '@/lib/question-picker'
 import { guarded, requireAuth, parseBody, ok, fail } from '@/lib/api'
 
@@ -10,6 +10,7 @@ export const dynamic = 'force-dynamic'
 const schema = z.object({
   opponentId: z.string().min(1),
   categoryFilter: z.string().nullable().optional(),
+  questionCount: z.number().int().optional(),
 })
 
 // POST /api/realtime/game-start — lancement de la partie par l'invitant.
@@ -19,17 +20,25 @@ const schema = z.object({
 // réponses avant le début du match et pouvait fournir n'importe quel contenu.
 export const POST = guarded(async (req: NextRequest) => {
   const auth = requireAuth(req)
-  const { opponentId, categoryFilter } = await parseBody(req, schema)
+  const body = await parseBody(req, schema)
+  const { opponentId, categoryFilter } = body
+  const questionCount = normaliseQuestionCount(body.questionCount ?? GAME_CONFIG.questionsPerGame)
 
-  const questions = await pickQuestions(categoryFilter ?? null, GAME_CONFIG.questionsPerGame)
-  if (questions.length < 4) {
+  const questions = await pickQuestions(categoryFilter ?? null, questionCount)
+  if (questions.length < GAME_CONFIG.minQuestions) {
     return fail(
       `Pas assez de questions disponibles (${questions.length}) pour lancer une partie`,
       400
     )
   }
 
-  const result = realtime.startGame(auth.userId, opponentId, categoryFilter ?? null, questions)
+  const result = realtime.startGame(
+    auth.userId,
+    opponentId,
+    categoryFilter ?? null,
+    questions,
+    questionCount
+  )
   if (!result.ok) return fail(result.error || 'Impossible de lancer la partie', 409)
 
   return ok({ ok: true, gameId: result.gameId, totalQuestions: questions.length })

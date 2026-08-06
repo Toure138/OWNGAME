@@ -253,8 +253,12 @@ async function send<T = any>(url: string, token: string, body?: unknown, method 
   return { ok: true, ...data } as T
 }
 
-export const sendInvite = (token: string, toUserId: string, categoryFilter: string | null) =>
-  send('/api/realtime/invite', token, { toUserId, categoryFilter })
+export const sendInvite = (
+  token: string,
+  toUserId: string,
+  categoryFilter: string | null,
+  questionCount: number
+) => send('/api/realtime/invite', token, { toUserId, categoryFilter, questionCount })
 
 export const cancelInvite = (token: string, invitationId: string) =>
   send('/api/realtime/invite', token, { invitationId }, 'DELETE')
@@ -262,15 +266,20 @@ export const cancelInvite = (token: string, invitationId: string) =>
 export const respondInvite = (token: string, invitationId: string, accept: boolean) =>
   send('/api/realtime/invite-respond', token, { invitationId, accept })
 
-export const startGame = (token: string, opponentId: string, categoryFilter: string | null) =>
-  send('/api/realtime/game-start', token, { opponentId, categoryFilter })
+export const startGame = (
+  token: string,
+  opponentId: string,
+  categoryFilter: string | null,
+  questionCount: number
+) => send('/api/realtime/game-start', token, { opponentId, categoryFilter, questionCount })
 
 /** Duel contre l'ordinateur : ni invitation, ni adversaire à attendre. */
 export const startSoloGame = (
   token: string,
   botProfile: string,
-  categoryFilter: string | null
-) => send('/api/realtime/solo-start', token, { botProfile, categoryFilter })
+  categoryFilter: string | null,
+  questionCount: number
+) => send('/api/realtime/solo-start', token, { botProfile, categoryFilter, questionCount })
 
 /** Présentation à un examen du parcours académique. */
 export const startExam = (token: string, degree: string) =>

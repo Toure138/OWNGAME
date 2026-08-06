@@ -68,6 +68,8 @@ export interface InvitationItem {
   fromLevel?: number
   toUserId: string
   categoryFilter: string | null
+  /** Longueur de partie décidée par l'invitant. */
+  questionCount?: number
   createdAt: number
 }
 
@@ -114,6 +116,9 @@ interface AppState {
   // Préférences de partie
   categoryFilter: string | null
   setCategoryFilter: (c: string | null) => void
+  /** Nombre de questions souhaité pour un duel ou une partie solo. */
+  questionCount: number
+  setQuestionCount: (n: number) => void
   soundEnabled: boolean
   toggleSound: () => void
 }
@@ -186,12 +191,14 @@ export const useApp = create<AppState>()(
 
       categoryFilter: null,
       setCategoryFilter: c => set({ categoryFilter: c }),
+      questionCount: 20,
+      setQuestionCount: n => set({ questionCount: n }),
       soundEnabled: true,
       toggleSound: () => set(state => ({ soundEnabled: !state.soundEnabled })),
     }),
     {
       name: 'qvgdm-store',
-      version: 2,
+      version: 3,
       // Seuls l'identité et les préférences sont conservées : l'état temps réel
       // (présence, invitations) doit toujours repartir du serveur.
       partialize: s => ({
@@ -199,6 +206,7 @@ export const useApp = create<AppState>()(
         user: s.user,
         view: s.view === 'game' ? 'lobby' : s.view,
         categoryFilter: s.categoryFilter,
+        questionCount: s.questionCount,
         soundEnabled: s.soundEnabled,
       }),
     }

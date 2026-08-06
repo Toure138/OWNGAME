@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useApp, type OnlinePlayer } from '@/lib/store'
 import { sendInvite, cancelInvite, startSoloGame, eventBus } from '@/hooks/use-realtime'
 import { BOT_PROFILES, DEFAULT_BOT } from '@/lib/bot'
+import { QUESTION_CHOICES, estimatedMinutes } from '@/lib/game-options'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -18,7 +19,7 @@ import { GamePrepareModal } from '@/components/game/game-prepare-modal'
 import { cn } from '@/lib/utils'
 import {
   Users, Search, Zap, Swords, Loader2, X, Trophy, Flame, Target, Layers, Shuffle,
-  Bot, GraduationCap, ArrowRight,
+  Bot, GraduationCap, ArrowRight, ListOrdered,
 } from 'lucide-react'
 
 interface Category {
@@ -43,6 +44,7 @@ type PrepareData = {
   opponentPseudo: string
   opponentAvatarUrl: string | null
   categoryFilter: string | null
+  questionCount: number
 }
 
 export function LobbyScreen() {
@@ -52,6 +54,8 @@ export function LobbyScreen() {
   const connected = useApp(s => s.connected)
   const categoryFilter = useApp(s => s.categoryFilter)
   const setCategoryFilter = useApp(s => s.setCategoryFilter)
+  const questionCount = useApp(s => s.questionCount)
+  const setQuestionCount = useApp(s => s.setQuestionCount)
   const setView = useApp(s => s.setView)
   const pendingInvite = useApp(s => s.pendingInvite)
   const setPendingInvite = useApp(s => s.setPendingInvite)
@@ -130,9 +134,11 @@ export function LobbyScreen() {
 
   const availableCount = onlinePlayers.filter(p => p.status === 'AVAILABLE').length
   const selectedCategory = categories.find(c => c.id === categoryFilter)
+  // Le serveur refuserait le lancement ; autant le dire avant le clic.
+  const tooFewQuestions = !!selectedCategory && selectedCategory.questionCount < questionCount
 
   async function invite(player: OnlinePlayer) {
-    const result = await sendInvite(token, player.userId, categoryFilter)
+    const result = await sendInvite(token, player.userId, categoryFilter, questionCount)
     if (result.ok) {
       setPendingInvite({
         invitationId: result.invitationId,
@@ -157,7 +163,7 @@ export function LobbyScreen() {
 
   async function playSolo() {
     setLaunchingSolo(true)
-    const result = await startSoloGame(token, botProfile, categoryFilter)
+    const result = await startSoloGame(token, botProfile, categoryFilter, questionCount)
     setLaunchingSolo(false)
     if (!result.ok) {
       toast({
@@ -277,12 +283,38 @@ export function LobbyScreen() {
                   ? `${selectedCategory.questionCount} questions dans « ${selectedCategory.name} »`
                   : `${categories.reduce((s, c) => s + c.questionCount, 0).toLocaleString('fr-FR')} questions disponibles`}
               </p>
+
+              <div className="space-y-2 pt-1">
+                <label className="flex items-center gap-1.5 text-sm font-medium">
+                  <ListOrdered className="h-4 w-4 text-muted-foreground" /> Longueur de la partie
+                </label>
+                <ToggleGroup
+                  type="single"
+                  value={String(questionCount)}
+                  onValueChange={v => v && setQuestionCount(Number(v))}
+                  variant="outline"
+                  size="sm"
+                  className="justify-start"
+                >
+                  {QUESTION_CHOICES.map(n => (
+                    <ToggleGroupItem key={n} value={String(n)}>
+                      {n}
+                    </ToggleGroupItem>
+                  ))}
+                </ToggleGroup>
+                <p className="text-xs text-muted-foreground">
+                  {questionCount} questions, soit {questionCount / 2} par joueur —
+                  environ {estimatedMinutes(questionCount)} min de jeu.
+                  {tooFewQuestions &&
+                    ' Cette catégorie n’en contient pas assez pour une partie aussi longue.'}
+                </p>
+              </div>
             </div>
 
             <div className="flex items-end">
               <Button
                 onClick={autoMatch}
-                disabled={matchmaking || !connected || !!pendingInvite}
+                disabled={matchmaking || !connected || !!pendingInvite || tooFewQuestions}
                 size="lg"
                 className="w-full gap-2 md:w-56"
               >
@@ -339,7 +371,7 @@ export function LobbyScreen() {
             </p>
             <Button
               onClick={playSolo}
-              disabled={launchingSolo || !connected}
+              disabled={launchingSolo || !connected || tooFewQuestions}
               className="w-full gap-2"
             >
               {launchingSolo ? (
@@ -530,7 +562,7 @@ export function LobbyScreen() {
                     <Button
                       size="sm"
                       variant={busy ? 'secondary' : 'default'}
-                      disabled={busy || !!pendingInvite}
+                      disabled={busy || !!pendingInvite || tooFewQuestions}
                       onClick={() => invite(p)}
                       className="shrink-0 gap-1.5"
                     >

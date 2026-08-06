@@ -1,9 +1,9 @@
 # Qui veut gagner 20 millions ?
 
-Quiz multijoueur en temps réel. Deux joueurs s'affrontent sur 20 questions
-tirées d'une banque de **7054 questions réparties en 20 catégories**. Chaque
-joueur traite la moitié des questions, avec 20 secondes de réflexion et un bonus
-de points proportionnel à sa rapidité.
+Quiz multijoueur en temps réel. Deux joueurs s'affrontent sur une partie de
+**6 à 50 questions** — au choix — tirées d'une banque de **7054 questions
+réparties en 20 catégories**. Chaque joueur traite la moitié des questions, avec
+20 secondes de réflexion et un bonus de points proportionnel à sa rapidité.
 
 Trois façons de jouer :
 
@@ -76,6 +76,25 @@ et le parcours académique.
 ---
 
 ## Modes de jeu
+
+### Longueur de la partie
+
+Le salon propose **6, 10, 20, 30 ou 50 questions**. Le choix vaut pour les duels
+comme pour les parties solo, et il est conservé d'une session à l'autre.
+
+Toutes les valeurs sont paires : chacun traite exactement la moitié des
+questions, et un nombre impair donnerait un tour de plus à l'un des deux camps.
+Le serveur applique lui-même cette règle et borne la valeur reçue entre 6 et 50
+— l'API est accessible directement, et une partie de 3 ou de 10 000 questions
+n'aurait pas de sens.
+
+En duel, la longueur est **fixée par l'invitant** : elle voyage avec
+l'invitation, s'affiche dans la fenêtre de défi que reçoit l'adversaire, puis
+accompagne le lancement. L'invité sait donc à quoi il s'engage en acceptant.
+
+Les examens du parcours académique gardent leur format propre, de 10 questions
+au CEP à 20 au doctorat : c'est une caractéristique du diplôme, pas une
+préférence de joueur.
 
 ### Contre l'ordinateur
 

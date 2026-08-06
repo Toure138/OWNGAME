@@ -508,9 +508,13 @@ async function main() {
   // et fausserait l'attente de l'invitation suivante.
   await call('POST', '/api/realtime/poll', { token: tokenB })
 
-  const invite = await check('A défie B', 'POST', '/api/realtime/invite', {
+  // Le duel se joue en 10 questions plutôt qu'en 20 : la longueur est choisie
+  // par l'invitant, et on vérifie au passage qu'elle traverse bien
+  // l'invitation, la préparation puis le lancement.
+  const DUEL_QUESTIONS = 10
+  const invite = await check('A défie B (partie de 10 questions)', 'POST', '/api/realtime/invite', {
     token: tokenA,
-    body: { toUserId: idB, categoryFilter: null },
+    body: { toUserId: idB, categoryFilter: null, questionCount: DUEL_QUESTIONS },
   })
   await check('invitation en double refusée', 'POST', '/api/realtime/invite', {
     token: tokenA,
@@ -534,16 +538,21 @@ async function main() {
 
   const prepare = await waitForEvent(tokenA, 'game:prepare', 6000)
   record(!!prepare.event, 'le joueur A est invité à préparer la partie', 'événement game:prepare non reçu')
+  record(
+    prepare.event?.data?.questionCount === DUEL_QUESTIONS,
+    'la longueur choisie accompagne la préparation',
+    `questionCount = ${prepare.event?.data?.questionCount}`
+  )
 
   const start = await check('A lance la partie', 'POST', '/api/realtime/game-start', {
     token: tokenA,
-    body: { opponentId: idB, categoryFilter: null },
+    body: { opponentId: idB, categoryFilter: null, questionCount: DUEL_QUESTIONS },
   })
   const gameId = start.data.gameId
   record(!!gameId, 'identifiant de partie retourné', 'gameId absent')
   record(
-    start.data.totalQuestions === 20,
-    'la partie compte 20 questions',
+    start.data.totalQuestions === DUEL_QUESTIONS,
+    `la partie compte ${DUEL_QUESTIONS} questions`,
     `totalQuestions = ${start.data.totalQuestions}`
   )
 
