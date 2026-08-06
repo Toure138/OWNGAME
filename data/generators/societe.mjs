@@ -30,6 +30,38 @@ const SPORTS = [
   ['le tennis en simple', 1, 'un court', 'une raquette'],
   ['le badminton en simple', 1, 'un court', 'un volant'],
   ['le tennis de table en simple', 1, 'une table', 'une raquette et une balle creuse'],
+  ['le futsal', 5, 'un parquet', 'un ballon à rebond réduit'],
+  ['le rugby à XIII', 13, 'un terrain en gazon', 'un ballon ovale'],
+  ['le beach-volley', 2, 'un terrain de sable', 'un ballon léger'],
+  ['le hockey sur gazon', 11, 'un terrain synthétique', 'une crosse recourbée'],
+  ['le netball', 7, 'un terrain sans planche d’appui', 'un ballon et des cerceaux'],
+  ['le football américain', 11, 'un terrain balisé en yards', 'un ballon ovale et un casque'],
+  ['le curling', 4, 'une piste de glace', 'des pierres de granit'],
+  ['l’aviron en quatre de couple', 4, 'un plan d’eau', 'des avirons et un bateau'],
+  ['le squash', 1, 'un court fermé', 'une raquette et une balle en caoutchouc'],
+  ['l’escrime', 1, 'une piste', 'un fleuret, une épée ou un sabre'],
+  ['le judo', 1, 'un tatami', 'un judogi'],
+  ['la boxe anglaise', 1, 'un ring', 'des gants'],
+]
+
+/** Épreuves d'athlétisme : nom, catégorie, particularité. */
+const ATHLETICS = [
+  ['le 100 mètres', 'les courses de sprint', 'un départ en starting-blocks'],
+  ['le 400 mètres', 'les courses de sprint prolongé', 'un tour de piste complet'],
+  ['le 1 500 mètres', 'les courses de demi-fond', 'trois tours et trois quarts'],
+  ['le marathon', 'les courses de fond', 'une distance de 42,195 km'],
+  ['le 110 mètres haies', 'les courses avec obstacles', 'dix haies à franchir'],
+  ['le 3 000 mètres steeple', 'les courses avec obstacles', 'une rivière à franchir'],
+  ['le saut en hauteur', 'les sauts', 'un franchissement dos à la barre'],
+  ['le saut à la perche', 'les sauts', 'l’usage d’une perche flexible'],
+  ['le saut en longueur', 'les sauts', 'une planche d’appel'],
+  ['le triple saut', 'les sauts', 'une succession de trois bonds'],
+  ['le lancer du poids', 'les lancers', 'une aire circulaire'],
+  ['le lancer du disque', 'les lancers', 'une rotation avant le lâcher'],
+  ['le lancer du javelot', 'les lancers', 'une course d’élan rectiligne'],
+  ['le lancer du marteau', 'les lancers', 'un engin muni d’un câble'],
+  ['le décathlon', 'les épreuves combinées', 'dix disciplines sur deux jours'],
+  ['l’heptathlon', 'les épreuves combinées', 'sept disciplines sur deux jours'],
 ]
 
 /** Jeux olympiques d'été : année, ville hôte, pays. */
@@ -139,6 +171,91 @@ export const SPORT_TEMPLATES = [
           .slice(0, 6)
           .map(o => yearOf(o[0])),
         explanation: `${city} : ${editions.map(e => yearOf(e[0])).join(', ')}`,
+      }
+    },
+  },
+  {
+    level: 'CEP',
+    difficulty: 'EASY',
+    build(rng) {
+      const [event, category] = pick(rng, ATHLETICS)
+      return {
+        text: `À quelle catégorie d’épreuves appartient ${event} ?`,
+        answer: cap(category),
+        distractors: othersFrom(rng, ATHLETICS, 1, category).map(cap),
+        explanation: `${cap(event)} relève ${de(category)}`,
+      }
+    },
+  },
+  {
+    level: 'BEPC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [event, , trait] = pick(rng, ATHLETICS)
+      return {
+        text: `Qu’est-ce qui caractérise ${event} ?`,
+        answer: cap(trait),
+        distractors: othersFrom(rng, ATHLETICS, 2, trait).map(cap),
+        explanation: `${cap(event)} : ${trait}`,
+      }
+    },
+  },
+  {
+    level: 'BAC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [event, , trait] = pick(rng, ATHLETICS)
+      return {
+        text: `Quelle épreuve d’athlétisme se distingue par ceci : ${trait} ?`,
+        answer: cap(event),
+        distractors: othersFrom(rng, ATHLETICS, 0, event).map(cap),
+        explanation: `${cap(event)}`,
+      }
+    },
+  },
+  {
+    level: 'LICENCE',
+    difficulty: 'HARD',
+    build(rng) {
+      const [sport, players, surface] = pick(rng, SPORTS)
+      return {
+        text: `Quel sport se pratique sur ${surface} à ${fr(players)} par équipe ?`,
+        answer: cap(sport),
+        distractors: othersFrom(rng, SPORTS, 0, sport).map(cap),
+        explanation: `${cap(sport)}`,
+      }
+    },
+  },
+  {
+    level: 'MASTER',
+    difficulty: 'HARD',
+    build(rng) {
+      const category = pick(rng, ['les courses de sprint', 'les sauts', 'les lancers', 'les épreuves combinées', 'les courses avec obstacles'])
+      const inCat = ATHLETICS.filter(e => e[1] === category)
+      const others = ATHLETICS.filter(e => e[1] !== category)
+      if (inCat.length < 2 || others.length < 4) return null
+      const [event] = pick(rng, inCat)
+      return {
+        text: `Parmi ces épreuves, laquelle relève ${de(category)} ?`,
+        answer: cap(event),
+        distractors: shuffled(rng, others).slice(0, 6).map(e => cap(e[0])),
+        explanation: `${cap(event)} appartient ${a(category)}`,
+      }
+    },
+  },
+  {
+    level: 'DOCTORAT',
+    difficulty: 'HARD',
+    build(rng) {
+      const a1 = pick(rng, OLYMPICS)
+      const b1 = pick(rng, OLYMPICS)
+      if (a1[0] === b1[0]) return null
+      const gap = Math.abs(a1[0] - b1[0])
+      return {
+        text: `Combien d’années séparent les Jeux de ${a1[1]} (${yearOf(a1[0])}) de ceux de ${b1[1]} (${yearOf(b1[0])}) ?`,
+        answer: `${fr(gap)} ans`,
+        distractors: [`${fr(gap + 4)} ans`, `${fr(Math.abs(gap - 4))} ans`, `${fr(gap + 8)} ans`, `${fr(gap + 12)} ans`],
+        explanation: `${yearOf(b1[0])} − ${yearOf(a1[0])} = ${fr(gap)} ans`,
       }
     },
   },
@@ -727,6 +844,27 @@ const AI_CONCEPTS = [
   ['la matrice de confusion', 'le tableau croisant prédictions et vérités', 'l’évaluation'],
   ['le rappel', 'la part des cas positifs effectivement détectés', 'l’évaluation'],
   ['la précision', 'la part de prédictions positives qui sont justes', 'l’évaluation'],
+  ['le score F1', 'la moyenne harmonique de la précision et du rappel', 'l’évaluation'],
+  ['la courbe ROC', 'le tracé du taux de vrais positifs contre les faux positifs', 'l’évaluation'],
+  ['le surapprentissage', 'un modèle collant au bruit des données d’entraînement', 'les difficultés d’apprentissage'],
+  ['le sous-apprentissage', 'un modèle trop simple pour capter la structure', 'les difficultés d’apprentissage'],
+  ['le déséquilibre de classes', 'une catégorie très minoritaire dans les données', 'les difficultés d’apprentissage'],
+  ['la fuite de données', 'une information du test présente à l’entraînement', 'les difficultés d’apprentissage'],
+  ['le biais algorithmique', 'la reproduction d’inégalités présentes dans les données', 'les difficultés d’apprentissage'],
+  ['l’auto-encodeur', 'un réseau apprenant à reconstruire son entrée', 'les architectures'],
+  ['le réseau antagoniste génératif', 'deux réseaux en compétition, générateur et discriminateur', 'les architectures'],
+  ['le modèle de diffusion', 'une génération par débruitage progressif', 'les architectures'],
+  ['la mémoire à long terme (LSTM)', 'une cellule récurrente à portes', 'les architectures'],
+  ['le mécanisme d’attention', 'la pondération dynamique des éléments d’une séquence', 'les architectures'],
+  ['le taux d’apprentissage', 'l’amplitude du pas de mise à jour des poids', 'l’optimisation'],
+  ['l’élan (momentum)', 'l’inertie donnée aux mises à jour successives', 'l’optimisation'],
+  ['la normalisation par lots', 'la stabilisation des activations sur chaque mini-lot', 'l’optimisation'],
+  ['l’arrêt précoce', 'l’interruption de l’entraînement avant la dégradation', 'l’optimisation'],
+  ['l’augmentation de données', 'la création d’exemples par transformation des données existantes', 'l’optimisation'],
+  ['l’apprentissage par transfert', 'la réutilisation d’un modèle pré-entraîné', 'les paradigmes d’apprentissage'],
+  ['l’apprentissage auto-supervisé', 'la création d’étiquettes à partir des données elles-mêmes', 'les paradigmes d’apprentissage'],
+  ['l’apprentissage fédéré', 'un entraînement réparti sans centraliser les données', 'les paradigmes d’apprentissage'],
+  ['l’apprentissage actif', 'la sélection des exemples les plus informatifs à étiqueter', 'les paradigmes d’apprentissage'],
 ]
 
 /** Jalons : événement, année. */
@@ -736,6 +874,26 @@ const AI_MILESTONES = [
   ['la percée des réseaux profonds au concours ImageNet', 2012],
   ['la victoire d’AlphaGo sur Lee Sedol au jeu de go', 2016],
   ['la publication de l’architecture Transformer', 2017],
+  ['la formulation du test de Turing', 1950],
+  ['la création du perceptron par Rosenblatt', 1958],
+  ['le premier hiver de l’intelligence artificielle', 1974],
+  ['la popularisation de la rétropropagation', 1986],
+  ['la reconnaissance de chiffres manuscrits par LeNet', 1998],
+  ['la percée d’AlphaFold sur le repliement des protéines', 2021],
+]
+
+/** Domaines d'application : nom, tâche type. */
+const AI_APPLICATIONS = [
+  ['la vision par ordinateur', 'reconnaître le contenu d’une image'],
+  ['le traitement automatique du langage', 'analyser et produire du texte'],
+  ['la reconnaissance vocale', 'transcrire la parole en texte'],
+  ['la synthèse vocale', 'produire une voix à partir d’un texte'],
+  ['la traduction automatique', 'convertir un texte d’une langue à une autre'],
+  ['les systèmes de recommandation', 'proposer des contenus adaptés à un profil'],
+  ['la détection d’anomalies', 'repérer les observations atypiques'],
+  ['la robotique autonome', 'commander un robot dans un environnement incertain'],
+  ['la prévision de séries temporelles', 'anticiper l’évolution d’une grandeur dans le temps'],
+  ['la génération d’images', 'produire une image à partir d’une description'],
 ]
 
 export const IA_TEMPLATES = [
@@ -812,20 +970,85 @@ export const IA_TEMPLATES = [
     level: 'DOCTORAT',
     difficulty: 'HARD',
     build(rng) {
-      const a = pick(rng, AI_MILESTONES)
-      const b = pick(rng, AI_MILESTONES)
-      if (a[0] === b[0] || a[1] === b[1]) return null
-      const earlier = a[1] < b[1] ? a : b
+      const x = pick(rng, AI_MILESTONES)
+      const y = pick(rng, AI_MILESTONES)
+      if (x[0] === y[0] || x[1] === y[1]) return null
+      const earlier = x[1] < y[1] ? x : y
       return {
-        text: `Lequel de ces jalons est le plus ancien : ${a[0]} ou ${b[0]} ?`,
+        text: `Lequel de ces jalons est le plus ancien : ${x[0]} ou ${y[0]} ?`,
         answer: cap(earlier[0]),
         distractors: [
-          cap(earlier[0] === a[0] ? b[0] : a[0]),
+          cap(earlier[0] === x[0] ? y[0] : x[0]),
           'Ils sont contemporains',
           'Impossible à déterminer',
           'Aucun des deux n’est daté',
         ],
-        explanation: `${yearOf(a[1])} et ${yearOf(b[1])}`,
+        explanation: `${yearOf(x[1])} et ${yearOf(y[1])}`,
+      }
+    },
+  },
+  {
+    level: 'CEP',
+    difficulty: 'EASY',
+    build(rng) {
+      const [application, task] = pick(rng, AI_APPLICATIONS)
+      return {
+        text: `À quoi sert ${application} ?`,
+        answer: cap(task),
+        distractors: othersFrom(rng, AI_APPLICATIONS, 1, task).map(cap),
+        explanation: `${cap(application)} permet de ${task}`,
+      }
+    },
+  },
+  {
+    level: 'BEPC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [application, task] = pick(rng, AI_APPLICATIONS)
+      return {
+        text: `Quel domaine de l’intelligence artificielle permet de ${task} ?`,
+        answer: cap(application),
+        distractors: othersFrom(rng, AI_APPLICATIONS, 0, application).map(cap),
+        explanation: `${cap(application)}`,
+      }
+    },
+  },
+  {
+    level: 'BAC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [milestone, yr] = pick(rng, AI_MILESTONES)
+      return {
+        text: `Quel jalon de l’intelligence artificielle remonte à ${yearOf(yr)} ?`,
+        answer: cap(milestone),
+        distractors: othersFrom(rng, AI_MILESTONES, 0, milestone).map(cap),
+        explanation: `${cap(milestone)} : ${yearOf(yr)}`,
+      }
+    },
+  },
+  {
+    level: 'LICENCE',
+    difficulty: 'HARD',
+    build(rng) {
+      const [concept, definition, family] = pick(rng, AI_CONCEPTS)
+      return {
+        text: `Quelle notion ${de(family)} se définit ainsi : ${definition} ?`,
+        answer: cap(concept),
+        distractors: othersFrom(rng, AI_CONCEPTS, 0, concept).map(cap),
+        explanation: `${cap(concept)}`,
+      }
+    },
+  },
+  {
+    level: 'DOCTORAT',
+    difficulty: 'HARD',
+    build(rng) {
+      const [concept, definition] = pick(rng, AI_CONCEPTS)
+      return {
+        text: `En apprentissage automatique, que recouvre exactement ${concept} ?`,
+        answer: cap(definition),
+        distractors: othersFrom(rng, AI_CONCEPTS, 1, definition).map(cap),
+        explanation: `${cap(concept)} : ${definition}`,
       }
     },
   },
@@ -865,6 +1088,47 @@ const UNITS = [
   ['la puissance', 'le watt', 'W'],
   ['la pression', 'le pascal', 'Pa'],
   ['la fréquence', 'le hertz', 'Hz'],
+  ['la tension électrique', 'le volt', 'V'],
+  ['la résistance électrique', 'l’ohm', 'Ω'],
+  ['la charge électrique', 'le coulomb', 'C'],
+  ['le volume', 'le mètre cube', 'm³'],
+  ['la superficie', 'le mètre carré', 'm²'],
+  ['la vitesse', 'le mètre par seconde', 'm/s'],
+  ['l’angle plan', 'le radian', 'rad'],
+  ['la radioactivité', 'le becquerel', 'Bq'],
+]
+
+/** Les sept merveilles du monde antique : nom, lieu. */
+const WONDERS = [
+  ['la grande pyramide de Gizeh', 'l’Égypte'],
+  ['les jardins suspendus de Babylone', 'la Mésopotamie'],
+  ['la statue de Zeus à Olympie', 'la Grèce'],
+  ['le temple d’Artémis à Éphèse', 'l’Anatolie'],
+  ['le mausolée d’Halicarnasse', 'l’Anatolie'],
+  ['le colosse de Rhodes', 'la Grèce'],
+  ['le phare d’Alexandrie', 'l’Égypte'],
+]
+
+/** Langues : nom, famille, aire principale. */
+const LANGUAGES = [
+  ['le français', 'les langues romanes', 'l’Europe et l’Afrique francophone'],
+  ['l’espagnol', 'les langues romanes', 'l’Amérique latine'],
+  ['l’italien', 'les langues romanes', 'la péninsule italienne'],
+  ['le portugais', 'les langues romanes', 'le Brésil et le Portugal'],
+  ['le roumain', 'les langues romanes', 'les Balkans'],
+  ['l’anglais', 'les langues germaniques', 'les îles Britanniques et l’Amérique du Nord'],
+  ['l’allemand', 'les langues germaniques', 'l’Europe centrale'],
+  ['le néerlandais', 'les langues germaniques', 'les Pays-Bas et la Flandre'],
+  ['le suédois', 'les langues germaniques', 'la Scandinavie'],
+  ['le russe', 'les langues slaves', 'l’Eurasie septentrionale'],
+  ['le polonais', 'les langues slaves', 'l’Europe centrale'],
+  ['l’arabe', 'les langues sémitiques', 'le Proche-Orient et l’Afrique du Nord'],
+  ['l’hébreu', 'les langues sémitiques', 'le Levant'],
+  ['le mandarin', 'les langues sino-tibétaines', 'la Chine'],
+  ['le japonais', 'les langues japoniques', 'l’archipel japonais'],
+  ['le swahili', 'les langues bantoues', 'l’Afrique de l’Est'],
+  ['le wolof', 'les langues nigéro-congolaises', 'le Sénégal'],
+  ['le hindi', 'les langues indo-aryennes', 'le nord de l’Inde'],
 ]
 
 export const CULTURE_TEMPLATES = [
@@ -943,6 +1207,88 @@ export const CULTURE_TEMPLATES = [
         answer: cap(quantity),
         distractors: othersFrom(rng, UNITS, 0, quantity).map(cap),
         explanation: `${cap(unit)} mesure ${quantity}`,
+      }
+    },
+  },
+  {
+    level: 'CEP',
+    difficulty: 'EASY',
+    build(rng) {
+      const [language, family] = pick(rng, LANGUAGES)
+      return {
+        text: `À quelle famille linguistique appartient ${language} ?`,
+        answer: cap(family),
+        distractors: othersFrom(rng, LANGUAGES, 1, family).map(cap),
+        explanation: `${cap(language)} fait partie ${de(family)}`,
+      }
+    },
+  },
+  {
+    level: 'BEPC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [language, , area] = pick(rng, LANGUAGES)
+      return {
+        text: `Quelle est l’aire principale ${de(language)} ?`,
+        answer: cap(area),
+        distractors: othersFrom(rng, LANGUAGES, 2, area).map(cap),
+        explanation: `${cap(language)} est parlé dans ${area}`,
+      }
+    },
+  },
+  {
+    level: 'BAC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [wonder, place] = pick(rng, WONDERS)
+      return {
+        text: `Où se dressait ${wonder}, l’une des sept merveilles du monde antique ?`,
+        answer: cap(place),
+        distractors: othersFrom(rng, WONDERS, 1, place).map(cap),
+        explanation: `${cap(wonder)} se trouvait dans ${place}`,
+      }
+    },
+  },
+  {
+    level: 'LICENCE',
+    difficulty: 'HARD',
+    build(rng) {
+      const family = pick(rng, ['les langues romanes', 'les langues germaniques', 'les langues slaves', 'les langues sémitiques'])
+      const inFamily = LANGUAGES.filter(l => l[1] === family)
+      const others = LANGUAGES.filter(l => l[1] !== family)
+      if (inFamily.length < 2 || others.length < 4) return null
+      const [language] = pick(rng, inFamily)
+      return {
+        text: `Parmi ces langues, laquelle appartient ${a(family)} ?`,
+        answer: cap(language),
+        distractors: shuffled(rng, others).slice(0, 6).map(l => cap(l[0])),
+        explanation: `${cap(language)} relève ${de(family)}`,
+      }
+    },
+  },
+  {
+    level: 'MASTER',
+    difficulty: 'HARD',
+    build(rng) {
+      const [language, family, area] = pick(rng, LANGUAGES)
+      return {
+        text: `Quelle langue ${de(family).replace(/^des /, '')}, parlée dans ${area}, correspond à cette description ?`,
+        answer: cap(language),
+        distractors: othersFrom(rng, LANGUAGES, 0, language).map(cap),
+        explanation: `${cap(language)} — ${family}, ${area}`,
+      }
+    },
+  },
+  {
+    level: 'DOCTORAT',
+    difficulty: 'HARD',
+    build(rng) {
+      const [wonder, place] = pick(rng, WONDERS)
+      return {
+        text: `Quelle merveille du monde antique s’élevait dans ${place} ?`,
+        answer: cap(wonder),
+        distractors: othersFrom(rng, WONDERS, 0, wonder).map(cap),
+        explanation: `${cap(wonder)}, dans ${place}`,
       }
     },
   },
