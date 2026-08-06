@@ -276,6 +276,40 @@ const THINKERS = [
   ['Hannah Arendt', 'Les Origines du totalitarisme', 'la nature du régime totalitaire'],
   ['John Rawls', 'Théorie de la justice', 'la justice comme équité'],
   ['Nicolas Machiavel', 'Le Prince', 'l’autonomie du politique'],
+  ['Platon', 'La République', 'le gouvernement des philosophes'],
+  ['Aristote', 'Les Politiques', 'la classification des régimes'],
+  ['Jean Bodin', 'Les Six Livres de la République', 'la souveraineté indivisible'],
+  ['Emmanuel Kant', 'Vers la paix perpétuelle', 'la fédération d’États libres'],
+  ['John Stuart Mill', 'De la liberté', 'la limite du pouvoir sur l’individu'],
+  ['Antonio Gramsci', 'Cahiers de prison', 'l’hégémonie culturelle'],
+  ['Michel Foucault', 'Surveiller et punir', 'le pouvoir disciplinaire'],
+  ['Pierre Bourdieu', 'La Distinction', 'la reproduction des rapports de domination'],
+  ['Jürgen Habermas', 'L’Espace public', 'la délibération rationnelle'],
+  ['Amartya Sen', 'Repenser l’inégalité', 'l’approche par les capabilités'],
+]
+
+/** Régimes politiques : nom, principe, exemple de mécanisme. */
+const REGIMES = [
+  ['la monarchie absolue', 'un pouvoir concentré et héréditaire', 'l’absence de contrôle du souverain'],
+  ['la monarchie constitutionnelle', 'un souverain encadré par une constitution', 'le règne sans gouvernement direct'],
+  ['la république parlementaire', 'un exécutif responsable devant le parlement', 'la motion de censure'],
+  ['le régime présidentiel', 'une séparation stricte des pouvoirs', 'l’absence de dissolution'],
+  ['le régime semi-présidentiel', 'un président élu et un gouvernement responsable', 'la cohabitation'],
+  ['la démocratie directe', 'des décisions prises par les citoyens eux-mêmes', 'le référendum d’initiative populaire'],
+  ['le régime autoritaire', 'un pluralisme politique restreint', 'la limitation des libertés publiques'],
+  ['le totalitarisme', 'l’emprise du pouvoir sur toute la société', 'le parti unique et l’idéologie officielle'],
+  ['la fédération', 'un partage constitutionnel des compétences', 'l’autonomie des États fédérés'],
+  ['l’État unitaire', 'une source unique du pouvoir normatif', 'la décentralisation par délégation'],
+]
+
+/** Modes de scrutin : nom, principe, effet observé. */
+const VOTING = [
+  ['le scrutin majoritaire à un tour', 'le candidat en tête l’emporte', 'la prime aux grands partis'],
+  ['le scrutin majoritaire à deux tours', 'un second tour départage les mieux placés', 'les alliances d’entre-deux-tours'],
+  ['la représentation proportionnelle', 'les sièges suivent les voix', 'la représentation des petites formations'],
+  ['le scrutin de liste bloquée', 'l’ordre des candidats est fixé par le parti', 'le renforcement des appareils'],
+  ['le vote préférentiel', 'l’électeur ordonne les candidats', 'la réduction du vote utile'],
+  ['le jugement majoritaire', 'chaque candidat reçoit une mention', 'la limitation du vote stratégique'],
 ]
 
 /** Organisations internationales : sigle, nom, siège, mission. */
@@ -369,6 +403,84 @@ export const POLITIQUE_TEMPLATES = [
       }
     },
   },
+  {
+    level: 'CEP',
+    difficulty: 'EASY',
+    build(rng) {
+      const [regime, principle] = pick(rng, REGIMES)
+      return {
+        text: `Sur quel principe repose ${regime} ?`,
+        answer: cap(principle),
+        distractors: othersFrom(rng, REGIMES, 1, principle).map(cap),
+        explanation: `${cap(regime)} : ${principle}`,
+      }
+    },
+  },
+  {
+    level: 'BEPC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [regime, , mechanism] = pick(rng, REGIMES)
+      return {
+        text: `Quel mécanisme caractérise ${regime} ?`,
+        answer: cap(mechanism),
+        distractors: othersFrom(rng, REGIMES, 2, mechanism).map(cap),
+        explanation: `${cap(regime)} se reconnaît à ${mechanism}`,
+      }
+    },
+  },
+  {
+    level: 'BAC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [vote, principle] = pick(rng, VOTING)
+      return {
+        text: `En quoi consiste ${vote} ?`,
+        answer: cap(principle),
+        distractors: othersFrom(rng, VOTING, 1, principle).map(cap),
+        explanation: `${cap(vote)} : ${principle}`,
+      }
+    },
+  },
+  {
+    level: 'LICENCE',
+    difficulty: 'HARD',
+    build(rng) {
+      const [vote, , effect] = pick(rng, VOTING)
+      return {
+        text: `Quel effet politique produit ${vote} ?`,
+        answer: cap(effect),
+        distractors: othersFrom(rng, VOTING, 2, effect).map(cap),
+        explanation: `${cap(vote)} entraîne ${effect}`,
+      }
+    },
+  },
+  {
+    level: 'MASTER',
+    difficulty: 'HARD',
+    build(rng) {
+      const [regime, principle, mechanism] = pick(rng, REGIMES)
+      return {
+        text: `Quel régime repose sur ${principle} et se reconnaît à ${mechanism} ?`,
+        answer: cap(regime),
+        distractors: othersFrom(rng, REGIMES, 0, regime).map(cap),
+        explanation: `${cap(regime)}`,
+      }
+    },
+  },
+  {
+    level: 'DOCTORAT',
+    difficulty: 'HARD',
+    build(rng) {
+      const [vote, principle, effect] = pick(rng, VOTING)
+      return {
+        text: `Quel mode de scrutin, fondé sur ce principe — ${principle} —, produit ${effect} ?`,
+        answer: cap(vote),
+        distractors: othersFrom(rng, VOTING, 0, vote).map(cap),
+        explanation: `${cap(vote)}`,
+      }
+    },
+  },
 ]
 
 // ---------------------------------------------------------------------------
@@ -384,6 +496,13 @@ const AGREEMENTS = [
   ['la convention de Ramsar', 1971, 'la protection des zones humides'],
   ['la convention CITES', 1973, 'le commerce des espèces menacées'],
   ['la convention de Bâle', 1989, 'les mouvements de déchets dangereux'],
+  ['la conférence de Stockholm', 1972, 'la première conférence de l’ONU sur l’environnement'],
+  ['le rapport Brundtland', 1987, 'la définition du développement durable'],
+  ['la convention de Vienne', 1985, 'le cadre de la protection de la couche d’ozone'],
+  ['la convention de Stockholm', 2001, 'l’élimination des polluants organiques persistants'],
+  ['le protocole de Nagoya', 2010, 'le partage des avantages des ressources génétiques'],
+  ['la convention de Minamata', 2013, 'la réduction des émissions de mercure'],
+  ['la convention de Bonn', 1979, 'la protection des espèces migratrices'],
 ]
 
 /** Écosystèmes : nom, caractéristique, menace principale. */
@@ -396,6 +515,37 @@ const ECOSYSTEMS = [
   ['la tourbière', 'un stock de carbone considérable', 'le drainage'],
   ['la forêt boréale', 'des conifères sur de vastes étendues', 'les incendies'],
   ['la prairie tempérée', 'des sols profonds et fertiles', 'la mise en culture'],
+  ['le désert chaud', 'des précipitations inférieures à 250 mm par an', 'la surexploitation des nappes'],
+  ['la forêt méditerranéenne', 'une végétation adaptée à la sécheresse estivale', 'les incendies'],
+  ['l’estuaire', 'la rencontre des eaux douces et salées', 'la pollution des bassins versants'],
+  ['la banquise', 'de la glace de mer saisonnière', 'la fonte accélérée'],
+  ['le lac d’altitude', 'une eau froide et pauvre en nutriments', 'les dépôts atmosphériques'],
+  ['la forêt tempérée caducifoliée', 'des arbres perdant leurs feuilles en hiver', 'la fragmentation'],
+  ['la zone abyssale', 'l’absence totale de lumière', 'l’exploitation minière des fonds marins'],
+  ['la steppe', 'un climat continental sec', 'la désertification'],
+]
+
+/** Gaz à effet de serre : nom, origine principale, pouvoir de réchauffement sur 100 ans. */
+const GREENHOUSE_GASES = [
+  ['le dioxyde de carbone', 'la combustion des énergies fossiles', 1],
+  ['le méthane', 'l’élevage et les rizières', 28],
+  ['le protoxyde d’azote', 'les engrais azotés', 265],
+  ['les hydrofluorocarbures', 'la réfrigération', 1400],
+  ['l’hexafluorure de soufre', 'l’appareillage électrique', 23500],
+]
+
+/** Énergies : nom, caractère renouvelable, principe. */
+const ENERGIES = [
+  ['l’énergie solaire photovoltaïque', 'renouvelable', 'la conversion directe de la lumière en électricité'],
+  ['l’énergie éolienne', 'renouvelable', 'la conversion de l’énergie cinétique du vent'],
+  ['l’hydroélectricité', 'renouvelable', 'la chute d’eau entraînant une turbine'],
+  ['la géothermie', 'renouvelable', 'l’exploitation de la chaleur du sous-sol'],
+  ['la biomasse', 'renouvelable', 'la combustion de matière organique'],
+  ['l’énergie marémotrice', 'renouvelable', 'l’exploitation du marnage des marées'],
+  ['le charbon', 'non renouvelable', 'la combustion d’une roche sédimentaire carbonée'],
+  ['le pétrole', 'non renouvelable', 'la combustion d’hydrocarbures liquides'],
+  ['le gaz naturel', 'non renouvelable', 'la combustion de méthane fossile'],
+  ['le nucléaire de fission', 'non renouvelable', 'la fission de noyaux lourds'],
 ]
 
 export const ENVIRONNEMENT_TEMPLATES = [
@@ -474,6 +624,84 @@ export const ENVIRONNEMENT_TEMPLATES = [
         answer: cap(eco),
         distractors: othersFrom(rng, ECOSYSTEMS, 0, eco).map(cap),
         explanation: `${cap(eco)} : ${trait}`,
+      }
+    },
+  },
+  {
+    level: 'CEP',
+    difficulty: 'EASY',
+    build(rng) {
+      const [energy, renewable] = pick(rng, ENERGIES)
+      return {
+        text: `${cap(energy)} est-elle une énergie renouvelable ?`,
+        answer: renewable === 'renouvelable' ? 'Oui, elle est renouvelable' : 'Non, elle ne l’est pas',
+        distractors: [
+          renewable === 'renouvelable' ? 'Non, elle ne l’est pas' : 'Oui, elle est renouvelable',
+          'Seulement en hiver',
+          'Uniquement en mer',
+          'Cela dépend du pays',
+        ],
+        explanation: `${cap(energy)} est ${renewable}`,
+      }
+    },
+  },
+  {
+    level: 'BAC',
+    difficulty: 'MEDIUM',
+    build(rng) {
+      const [energy, , principle] = pick(rng, ENERGIES)
+      return {
+        text: `Sur quel principe repose ${energy} ?`,
+        answer: cap(principle),
+        distractors: othersFrom(rng, ENERGIES, 2, principle).map(cap),
+        explanation: `${cap(energy)} : ${principle}`,
+      }
+    },
+  },
+  {
+    level: 'LICENCE',
+    difficulty: 'HARD',
+    build(rng) {
+      const [gas, origin] = pick(rng, GREENHOUSE_GASES)
+      return {
+        text: `Quelle est la principale origine des émissions ${de(gas)} ?`,
+        answer: cap(origin),
+        distractors: othersFrom(rng, GREENHOUSE_GASES, 1, origin).map(cap),
+        explanation: `${cap(gas)} provient surtout ${de(origin)}`,
+      }
+    },
+  },
+  {
+    level: 'MASTER',
+    difficulty: 'HARD',
+    build(rng) {
+      const [gas, , power] = pick(rng, GREENHOUSE_GASES)
+      return {
+        text: `Quel est le pouvoir de réchauffement global ${de(gas)} sur cent ans, le CO₂ valant 1 ?`,
+        answer: fr(power),
+        distractors: othersFrom(rng, GREENHOUSE_GASES, 2, power).map(p => fr(p)),
+        explanation: `${cap(gas)} : PRG de ${fr(power)}`,
+      }
+    },
+  },
+  {
+    level: 'DOCTORAT',
+    difficulty: 'HARD',
+    build(rng) {
+      const a = pick(rng, GREENHOUSE_GASES)
+      const b = pick(rng, GREENHOUSE_GASES)
+      if (a[0] === b[0] || a[2] === b[2]) return null
+      const stronger = a[2] > b[2] ? a : b
+      return {
+        text: `Lequel de ces deux gaz a le pouvoir de réchauffement le plus élevé : ${a[0]} ou ${b[0]} ?`,
+        answer: cap(stronger[0]),
+        distractors: [
+          cap(stronger[0] === a[0] ? b[0] : a[0]),
+          'Ils ont le même pouvoir',
+          'Impossible à déterminer',
+          'Aucun des deux n’est un gaz à effet de serre',
+        ],
+        explanation: `PRG : ${fr(a[2])} contre ${fr(b[2])}`,
       }
     },
   },
