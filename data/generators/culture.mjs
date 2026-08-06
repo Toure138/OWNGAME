@@ -5,7 +5,7 @@
 // inverse, datation, comparaison. Regroupées dans un seul module parce qu'elles
 // partagent exactement cette structure.
 
-import { de, fr, pick, shuffled, year as yearOf } from './kit.mjs'
+import { a, de, fr, pick, shuffled, year as yearOf } from './kit.mjs'
 
 function othersFrom(rng, table, index, answer) {
   return shuffled(rng, table).map(r => r[index]).filter(v => v !== answer).slice(0, 6)
@@ -76,7 +76,7 @@ export const CINEMA_TEMPLATES = [
         text: `À quel genre appartient le film « ${title} » ?`,
         answer: cap(genre),
         distractors: othersFrom(rng, FILMS, 3, genre).map(cap),
-        explanation: `« ${title} » relève ${genre.startsWith('l’') ? 'de ' + genre : 'du ' + genre.replace(/^le |^la /, '')}`,
+        explanation: `« ${title} » relève ${de(genre)}`,
       }
     },
   },
@@ -234,7 +234,7 @@ export const MUSIQUE_TEMPLATES = [
     build(rng) {
       const [name, , play] = pick(rng, INSTRUMENTS)
       return {
-        text: `Comment produit-on le son ${name.startsWith('l’') ? 'de ' + name : 'du ' + name.replace(/^le |^la /, '')} ?`,
+        text: `Comment produit-on le son ${de(name)} ?`,
         answer: `Avec ${play}`,
         distractors: othersFrom(rng, INSTRUMENTS, 2, play).map(p => `Avec ${p}`),
         explanation: `${cap(name)} se joue avec ${play}`,
@@ -400,7 +400,7 @@ export const LITTERATURE_TEMPLATES = [
         text: `À quel courant ou genre rattache-t-on « ${title} » ?`,
         answer: cap(genre),
         distractors: othersFrom(rng, BOOKS, 3, genre).map(cap),
-        explanation: `« ${title} » relève ${genre.startsWith('l’') ? 'de ' + genre : 'du ' + genre.replace(/^le |^la /, '')}`,
+        explanation: `« ${title} » relève ${de(genre)}`,
       }
     },
   },

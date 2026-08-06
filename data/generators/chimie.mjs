@@ -4,7 +4,7 @@
 // jamais recopiées : ajouter une molécule à la table suffit, et aucune valeur ne
 // peut être en désaccord avec une autre.
 
-import { fr, intBetween, numericDistractors, pick, sup } from './kit.mjs'
+import { de, fr, intBetween, numericDistractors, pick, sup } from './kit.mjs'
 
 const CATEGORY = 'Chimie'
 
@@ -124,12 +124,12 @@ export const TEMPLATES = [
     build(rng) {
       const m = pick(rng, MOLECULES)
       return {
-        text: `Quelle est la formule chimique de ${m.name} ?`,
+        text: `Quelle est la formule chimique ${de(m.name)} ?`,
         answer: m.formula,
         distractors: MOLECULES.filter(x => x.formula !== m.formula)
           .slice(0, 40)
           .map(x => x.formula),
-        explanation: `${m.name} s’écrit ${m.formula}`,
+        explanation: `${m.name.charAt(0).toUpperCase()}${m.name.slice(1)} s’écrit ${m.formula}`,
       }
     },
   },

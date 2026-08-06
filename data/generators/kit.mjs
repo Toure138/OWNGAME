@@ -94,6 +94,13 @@ export function dans(name) {
   return `à ${name}`
 }
 
+/** « au monopole », « à la guerre », « aux mers » : préposition à + article. */
+export function a(name) {
+  if (name.startsWith('les ')) return `aux ${name.slice(4)}`
+  if (name.startsWith('le ')) return `au ${name.slice(3)}`
+  return `à ${name}`
+}
+
 /**
  * Année, sans séparateur de milliers.
  *

@@ -6,7 +6,7 @@
 // calculée ; la justesse des questions vaut celle de ces tables, écrites une
 // seule fois et donc relisables.
 
-import { de, fr, pick, shuffled, year as yearOf } from './kit.mjs'
+import { a, de, fr, pick, shuffled, year as yearOf } from './kit.mjs'
 
 const CATEGORY = 'Histoire'
 
@@ -152,7 +152,7 @@ export const TEMPLATES = [
         text: `Pour quel fait ${name} est-il resté célèbre ?`,
         answer: deed.charAt(0).toUpperCase() + deed.slice(1),
         distractors: othersFrom(rng, FIGURES, 3, deed).map(d => d.charAt(0).toUpperCase() + d.slice(1)),
-        explanation: `${name} est associé à ${deed}`,
+        explanation: `${name} est associé ${a(deed)}`,
       }
     },
   },
@@ -224,10 +224,10 @@ export const TEMPLATES = [
     build(rng) {
       const [civ, periode, , apport] = pick(rng, CIVILISATIONS)
       return {
-        text: `Quel apport majeur attribue-t-on à ${civ} ?`,
+        text: `Quel apport majeur attribue-t-on ${a(civ)} ?`,
         answer: apport.charAt(0).toUpperCase() + apport.slice(1),
         distractors: othersFrom(rng, CIVILISATIONS, 3, apport).map(a => a.charAt(0).toUpperCase() + a.slice(1)),
-        explanation: `${civ.charAt(0).toUpperCase()}${civ.slice(1)}, au ${periode.replace(/^au /, '')}, est associé à ${apport}`,
+        explanation: `${civ.charAt(0).toUpperCase()}${civ.slice(1)}, ${periode}, est associé ${a(apport)}`,
       }
     },
   },

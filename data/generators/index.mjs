@@ -19,6 +19,19 @@ import {
   MUSIQUE_TEMPLATES,
   LITTERATURE_TEMPLATES,
 } from './culture.mjs'
+import {
+  BIOLOGIE_TEMPLATES,
+  SANTE_TEMPLATES,
+  TERRE_TEMPLATES,
+} from './sciences.mjs'
+import {
+  SPORT_TEMPLATES,
+  TECHNOLOGIE_TEMPLATES,
+  POLITIQUE_TEMPLATES,
+  ENVIRONNEMENT_TEMPLATES,
+  IA_TEMPLATES,
+  CULTURE_TEMPLATES,
+} from './societe.mjs'
 
 /**
  * Répartition des questions générées entre les six paliers.
@@ -55,6 +68,15 @@ export const GENERATORS = [
   { category: 'Cinéma', templates: CINEMA_TEMPLATES },
   { category: 'Musique', templates: MUSIQUE_TEMPLATES },
   { category: 'Littérature', templates: LITTERATURE_TEMPLATES },
+  { category: 'Biologie', templates: BIOLOGIE_TEMPLATES },
+  { category: 'Santé', templates: SANTE_TEMPLATES },
+  { category: 'Sciences de la Terre', templates: TERRE_TEMPLATES },
+  { category: 'Sport', templates: SPORT_TEMPLATES },
+  { category: 'Technologie', templates: TECHNOLOGIE_TEMPLATES },
+  { category: 'Politique', templates: POLITIQUE_TEMPLATES },
+  { category: 'Environnement', templates: ENVIRONNEMENT_TEMPLATES },
+  { category: 'Intelligence artificielle', templates: IA_TEMPLATES },
+  { category: 'Culture générale', templates: CULTURE_TEMPLATES },
 ]
 
 /**
