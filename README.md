@@ -1,7 +1,7 @@
 # Qui veut gagner 20 millions ?
 
 Quiz multijoueur en temps réel. Deux joueurs s'affrontent sur une partie de
-**6 à 50 questions** — au choix — tirées d'une banque de **7054 questions
+**6 à 50 questions** — au choix — tirées d'une banque de **7292 questions
 réparties en 20 catégories**. Chaque joueur traite la moitié des questions, avec
 20 secondes de réflexion et un bonus de points proportionnel à sa rapidité.
 
@@ -137,11 +137,11 @@ affiché à côté de son pseudo, y compris dans le classement.
 L'ordre du cursus est vérifié côté serveur : appeler directement l'API pour
 passer le doctorat sans avoir le CEP renvoie une erreur 403.
 
-### D'où viennent les 7054 questions
+### D'où viennent les 7292 questions
 
 | Origine | Nombre | Catégories |
 | ------- | ------ | ---------- |
-| Rédigées à la main | 1054 | Les 20 catégories |
+| Rédigées à la main | 1292 | Les 20 catégories |
 | Générées | 6000 | Mathématiques, Physique, Chimie, Informatique, Télécommunications, Économie — 1000 chacune |
 
 Les six catégories « calculables » atteignent 1000 questions grâce aux
@@ -155,10 +155,18 @@ multiplier les erreurs factuelles.
 Le tirage est déterministe : l'énoncé sert de clé d'unicité en base, une
 génération aléatoire ferait diverger la banque à chaque peuplement.
 
-Les quatorze autres catégories restent à 50-56 questions rédigées. **Elles ne
+Les quatorze autres catégories comptent 61 à 74 questions rédigées. **Elles ne
 peuvent pas être générées** : une question d'histoire ou de cinéma suppose des
 faits, et les inventer produirait des énoncés faux. Les étoffer demande un
 travail de rédaction, pas de code.
+
+Elles sont en revanche **complètes en profondeur** : chacune compte au moins dix
+questions à chacun des six paliers. Ce n'était pas le cas — « Culture générale »
+n'avait aucune question de niveau master, « Intelligence artificielle » n'en
+comptait que deux au niveau primaire — et un joueur qui filtrait sur ces
+catégories tombait sur une partie impossible à composer.
+[`data/questions/paliers.mjs`](./data/questions/paliers.mjs) réunit les 238
+questions écrites pour combler ces trous.
 
 Chaque gabarit déclare le palier auquel il appartient, si bien que les six
 catégories générées couvrent les six niveaux de façon régulière — environ 210
@@ -183,7 +191,7 @@ Ce découpage ne s'applique qu'aux questions rédigées sans palier explicite. U
 question qui en déclare un — celles de `data/questions/avance.mjs` et toutes
 celles des générateurs — le conserve tel quel : un découpage par percentiles
 maintiendrait le doctorat à 7 % de la banque quoi qu'on ajoute. Sur l'ensemble,
-la banque compte aujourd'hui **1440 questions au CEP et 696 au doctorat**.
+la banque compte aujourd'hui **1467 questions au CEP et 778 au doctorat**.
 
 Le classement est strictement déterministe, et chaque question reste modifiable
 palier par palier depuis l'administration. Le peuplement ne recalcule jamais une
@@ -256,7 +264,8 @@ décrit le service, la commande de build, le démarrage et la sonde de santé.
 data/                        Banque de questions (JavaScript pur)
   index.mjs                  Catalogue des catégories + agrégation de la banque
   permute.mjs                Placement déterministe de la bonne réponse
-  questions/*.mjs            1054 questions rédigées, en tuples compacts
+  questions/*.mjs            1292 questions rédigées, en tuples compacts
+  questions/paliers.mjs      238 d'entre elles, écrites pour combler les niveaux
   generators/*.mjs           6000 questions calculées, 1000 par matière
 prisma/schema.prisma         Modèle de données
   levels.mjs                 Répartition de la banque en six paliers académiques

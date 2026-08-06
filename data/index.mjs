@@ -8,6 +8,7 @@ import { HISTOIRE, GEOGRAPHIE, POLITIQUE, ECONOMIE } from './questions/societe.m
 import { CULTURE_GENERALE, SPORT, CINEMA, MUSIQUE } from './questions/culture.mjs'
 import { LITTERATURE, TECHNOLOGIE, SANTE, ENVIRONNEMENT } from './questions/savoirs.mjs'
 import { AVANCE } from './questions/avance.mjs'
+import { PALIERS } from './questions/paliers.mjs'
 import { permuteFor } from './permute.mjs'
 import { getGeneratedQuestions } from './generators/index.mjs'
 
@@ -48,8 +49,8 @@ const BASE_CATEGORIES = [
  * trouver aussi bien la question de niveau primaire que celle de doctorat.
  */
 export const CATEGORIES = BASE_CATEGORIES.map(category => {
-  const extra = AVANCE[category.slug]
-  return extra ? { ...category, questions: [...category.questions, ...extra] } : category
+  const extra = [...(AVANCE[category.slug] || []), ...(PALIERS[category.slug] || [])]
+  return extra.length ? { ...category, questions: [...category.questions, ...extra] } : category
 })
 
 const LETTERS = ['A', 'B', 'C', 'D']
